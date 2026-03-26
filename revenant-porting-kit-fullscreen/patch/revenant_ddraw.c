@@ -107,6 +107,8 @@ struct RDDSurface {
     RDDSurface *back_buffer;    /* primary -> back */
     DWORD caps;
     DDPIXELFORMAT pixfmt;  /* actual pixel format from CreateSurface */
+    DDCOLORKEY src_color_key;
+    BOOL has_src_color_key;
     /* GetDC state */
     HDC hdc_mem;
     HBITMAP hdc_bmp;
@@ -130,6 +132,10 @@ static DD4Obj g_dd4;
 static DD1Obj g_dd1;
 static BOOL g_initialized = FALSE;
 static RDDSurface *g_render_target = NULL;
+static RECT g_orig_rect = {0};
+static BOOL g_is_fullscreen = FALSE;
+
+static void restore_window(void);
 
 /* ================================================================
  * Presentation: RGB565 LUT + StretchDIBits
@@ -163,8 +169,9 @@ static void present_frame(RDDSurface *primary) {
     HDC hdc;
     int count, i;
     WORD *src;
+    int win_w, win_h, dest_w, dest_h, dest_x, dest_y;
 
-    if (!g_hwnd || !primary || !primary->pixels || !g_present_buf) return;
+    if (!g_hwnd || !primary || !primary->pixels || !g_present_buf || !g_is_fullscreen) return;
 
     /* Convert RGB565 -> BGR8888 */
     src = (WORD *)primary->pixels;
@@ -176,10 +183,45 @@ static void present_frame(RDDSurface *primary) {
     hdc = GetDC(g_hwnd);
     if (!hdc) return;
 
+    win_w = rc.right;
+    win_h = rc.bottom;
+
+    /* Compute centered 4:3 rectangle preserving aspect ratio */
+    if (win_w * 3 > win_h * 4) {
+        /* Window wider than 4:3: pillarbox (black bars left/right) */
+        dest_h = win_h;
+        dest_w = win_h * 4 / 3;
+        dest_x = (win_w - dest_w) / 2;
+        dest_y = 0;
+    } else {
+        /* Window taller than 4:3: letterbox (black bars top/bottom) */
+        dest_w = win_w;
+        dest_h = win_w * 3 / 4;
+        dest_x = 0;
+        dest_y = (win_h - dest_h) / 2;
+    }
+
+    /* Fill black bars */
+    if (dest_x > 0 || dest_y > 0) {
+        HBRUSH black = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        if (dest_x > 0) {
+            RECT left_bar = {0, 0, dest_x, win_h};
+            RECT right_bar = {dest_x + dest_w, 0, win_w, win_h};
+            FillRect(hdc, &left_bar, black);
+            FillRect(hdc, &right_bar, black);
+        }
+        if (dest_y > 0) {
+            RECT top_bar = {0, 0, win_w, dest_y};
+            RECT bottom_bar = {0, dest_y + dest_h, win_w, win_h};
+            FillRect(hdc, &top_bar, black);
+            FillRect(hdc, &bottom_bar, black);
+        }
+    }
+
     SetStretchBltMode(hdc, HALFTONE);
     SetBrushOrgEx(hdc, 0, 0, NULL);
     StretchDIBits(hdc,
-        0, 0, rc.right, rc.bottom,
+        dest_x, dest_y, dest_w, dest_h,
         0, 0, (int)primary->width, (int)primary->height,
         g_present_buf, &g_bmi, DIB_RGB_COLORS, SRCCOPY);
 
@@ -383,8 +425,13 @@ static HRESULT WINAPI Surf_GetBltStatus(RDDSurface *s, DWORD f)
     { (void)s; (void)f; return DD_OK; }
 static HRESULT WINAPI Surf_GetClipper(RDDSurface *s, void **c)
     { (void)s; *c = NULL; return DDERR_NOCLIPPERATTACHED; }
-static HRESULT WINAPI Surf_GetColorKey(RDDSurface *s, DWORD f, LPDDCOLORKEY k)
-    { (void)s; (void)f; (void)k; return DDERR_NOCOLORKEY; }
+static HRESULT WINAPI Surf_GetColorKey(RDDSurface *s, DWORD f, LPDDCOLORKEY k) {
+    if ((f & DDCKEY_SRCBLT) && s->has_src_color_key) {
+        *k = s->src_color_key;
+        return DD_OK;
+    }
+    return DDERR_NOCOLORKEY;
+}
 static HRESULT WINAPI Surf_GetDC(RDDSurface *s, HDC *hdc) {
     HDC screen_dc, mem_dc;
     BITMAPINFO bmi;
@@ -463,8 +510,15 @@ static HRESULT WINAPI Surf_ReleaseDC(RDDSurface *s, HDC hdc) {
 }
 static HRESULT WINAPI Surf_SetClipper(RDDSurface *s, void *c)
     { rdd_log("Surf_SetClipper: type=%d clipper=%p", s->type, c); return DD_OK; }
-static HRESULT WINAPI Surf_SetColorKey(RDDSurface *s, DWORD f, LPDDCOLORKEY k)
-    { (void)s; (void)f; (void)k; return DD_OK; }
+static HRESULT WINAPI Surf_SetColorKey(RDDSurface *s, DWORD f, LPDDCOLORKEY k) {
+    if ((f & DDCKEY_SRCBLT) && k) {
+        s->src_color_key = *k;
+        s->has_src_color_key = TRUE;
+        rdd_log("Surf_SetColorKey: SRCBLT low=0x%lx high=0x%lx type=%d",
+                k->dwColorSpaceLowValue, k->dwColorSpaceHighValue, s->type);
+    }
+    return DD_OK;
+}
 static HRESULT WINAPI Surf_SetOverlayPosition(RDDSurface *s, LONG x, LONG y)
     { (void)s; (void)x; (void)y; return DDERR_NOTAOVERLAYSURFACE; }
 static HRESULT WINAPI Surf_SetPalette(RDDSurface *s, void *p)
@@ -636,6 +690,17 @@ static HRESULT WINAPI Surf_Blt(RDDSurface *self, LPRECT dst_rect,
         RECT sr, dr;
         int src_w, src_h, dst_w, dst_h, y;
         int bytes_per_pixel = (int)(self->bpp / 8);
+        BOOL use_colorkey = FALSE;
+        DWORD ck_low = 0;
+
+        /* Determine if source color key transparency is needed */
+        if ((flags & DDBLT_KEYSRCOVERRIDE) && fx) {
+            use_colorkey = TRUE;
+            ck_low = fx->ddckSrcColorkey.dwColorSpaceLowValue;
+        } else if ((flags & DDBLT_KEYSRC) && src->has_src_color_key) {
+            use_colorkey = TRUE;
+            ck_low = src->src_color_key.dwColorSpaceLowValue;
+        }
 
         sr.left = 0; sr.top = 0;
         sr.right = (LONG)src->width; sr.bottom = (LONG)src->height;
@@ -654,12 +719,25 @@ static HRESULT WINAPI Surf_Blt(RDDSurface *self, LPRECT dst_rect,
         if (src_w > dst_w) src_w = dst_w;
         if (src_h > dst_h) src_h = dst_h;
 
-        for (y = 0; y < src_h; y++) {
-            BYTE *dst_row = self->pixels + (dr.top + y) * self->pitch + dr.left * bytes_per_pixel;
-            BYTE *src_row = src->pixels + (sr.top + y) * src->pitch + sr.left * bytes_per_pixel;
-            memcpy(dst_row, src_row, (size_t)(src_w * bytes_per_pixel));
+        if (use_colorkey && bytes_per_pixel == 2) {
+            WORD ck16 = (WORD)(ck_low & 0xFFFF);
+            for (y = 0; y < src_h; y++) {
+                WORD *d = (WORD *)(self->pixels + (dr.top + y) * self->pitch + dr.left * 2);
+                WORD *s = (WORD *)(src->pixels + (sr.top + y) * src->pitch + sr.left * 2);
+                int x;
+                for (x = 0; x < src_w; x++) {
+                    if (s[x] != ck16)
+                        d[x] = s[x];
+                }
+            }
+        } else {
+            for (y = 0; y < src_h; y++) {
+                BYTE *dst_row = self->pixels + (dr.top + y) * self->pitch + dr.left * bytes_per_pixel;
+                BYTE *src_row = src->pixels + (sr.top + y) * src->pitch + sr.left * bytes_per_pixel;
+                memcpy(dst_row, src_row, (size_t)(src_w * bytes_per_pixel));
+            }
         }
-        { rdd_log("Surf_Blt: copy %dx%d to type=%d", src_w, src_h, self->type); }
+        { rdd_log("Surf_Blt: copy %dx%d to type=%d colorkey=%d", src_w, src_h, self->type, use_colorkey); }
 
         /* Present if we just blitted to the primary surface */
         if (self->type == SURF_PRIMARY)
@@ -677,7 +755,6 @@ static HRESULT WINAPI Surf_BltFast(RDDSurface *self, DWORD dx, DWORD dy,
     RECT sr;
     int w, h, y;
     int bytes_per_pixel;
-    (void)flags;
 
     if (!src) return DDERR_INVALIDPARAMS;
 
@@ -695,10 +772,23 @@ static HRESULT WINAPI Surf_BltFast(RDDSurface *self, DWORD dx, DWORD dy,
     if ((int)dy + h > (int)self->height) h = (int)self->height - (int)dy;
     if (w <= 0 || h <= 0) return DD_OK;
 
-    for (y = 0; y < h; y++) {
-        BYTE *dst_row = self->pixels + ((int)dy + y) * self->pitch + (int)dx * bytes_per_pixel;
-        BYTE *src_row = src->pixels + (sr.top + y) * src->pitch + sr.left * bytes_per_pixel;
-        memcpy(dst_row, src_row, (size_t)(w * bytes_per_pixel));
+    if ((flags & DDBLTFAST_SRCCOLORKEY) && src->has_src_color_key && bytes_per_pixel == 2) {
+        WORD ck16 = (WORD)(src->src_color_key.dwColorSpaceLowValue & 0xFFFF);
+        for (y = 0; y < h; y++) {
+            WORD *d = (WORD *)(self->pixels + ((int)dy + y) * self->pitch + (int)dx * 2);
+            WORD *s = (WORD *)(src->pixels + (sr.top + y) * src->pitch + sr.left * 2);
+            int x;
+            for (x = 0; x < w; x++) {
+                if (s[x] != ck16)
+                    d[x] = s[x];
+            }
+        }
+    } else {
+        for (y = 0; y < h; y++) {
+            BYTE *dst_row = self->pixels + ((int)dy + y) * self->pitch + (int)dx * bytes_per_pixel;
+            BYTE *src_row = src->pixels + (sr.top + y) * src->pitch + sr.left * bytes_per_pixel;
+            memcpy(dst_row, src_row, (size_t)(w * bytes_per_pixel));
+        }
     }
 
     /* Present if we just blitted to the primary surface */
@@ -1411,14 +1501,16 @@ static HRESULT WINAPI DD4_GetCaps(DD4Obj *self, LPDDCAPS hal, LPDDCAPS hel) {
     if (hal) {
         memset(hal, 0, sizeof(DDCAPS));
         hal->dwSize = sizeof(DDCAPS);
-        hal->dwCaps = DDCAPS_BLT | DDCAPS_BLTCOLORFILL;
+        hal->dwCaps = DDCAPS_BLT | DDCAPS_BLTCOLORFILL | DDCAPS_COLORKEY;
+        hal->dwCKeyCaps = DDCKEYCAPS_SRCBLT;
         hal->dwVidMemTotal = 64 * 1024 * 1024;
         hal->dwVidMemFree  = 64 * 1024 * 1024;
     }
     if (hel) {
         memset(hel, 0, sizeof(DDCAPS));
         hel->dwSize = sizeof(DDCAPS);
-        hel->dwCaps = DDCAPS_BLT | DDCAPS_BLTCOLORFILL;
+        hel->dwCaps = DDCAPS_BLT | DDCAPS_BLTCOLORFILL | DDCAPS_COLORKEY;
+        hel->dwCKeyCaps = DDCKEYCAPS_SRCBLT;
     }
     return DD_OK;
 }
@@ -1466,6 +1558,7 @@ static HRESULT WINAPI DD4_GetDeviceIdentifier(DD4Obj *self, void *di_raw, DWORD 
 static HRESULT WINAPI DD4_RestoreDisplayMode(DD4Obj *self) {
     (void)self;
     rdd_log("DD4_RestoreDisplayMode");
+    restore_window();
     return DD_OK;
 }
 
@@ -1474,13 +1567,33 @@ static HRESULT WINAPI DD4_SetCooperativeLevel(DD4Obj *self, HWND hwnd, DWORD fla
     rdd_log("DD4_SetCooperativeLevel: hwnd=%p flags=0x%lx", (void*)hwnd, flags);
     g_hwnd = hwnd;
 
+    /* DDSCL_NORMAL (0x8): game is leaving exclusive mode (e.g. during exit) */
+    if (flags & DDSCL_NORMAL)
+        restore_window();
+
     return DD_OK;
+}
+
+static void restore_window(void) {
+    if (!g_is_fullscreen || !g_hwnd) return;
+    g_is_fullscreen = FALSE;
+    SetWindowPos(g_hwnd, HWND_NOTOPMOST,
+                 g_orig_rect.left, g_orig_rect.top,
+                 g_orig_rect.right - g_orig_rect.left,
+                 g_orig_rect.bottom - g_orig_rect.top,
+                 SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+    rdd_log("restore_window: restored to %ldx%ld",
+            g_orig_rect.right - g_orig_rect.left,
+            g_orig_rect.bottom - g_orig_rect.top);
 }
 
 static void setup_fullscreen_window(void) {
     int screen_w, screen_h;
 
     if (!g_hwnd) return;
+
+    /* Save original window rect for restoration on exit */
+    GetWindowRect(g_hwnd, &g_orig_rect);
 
     screen_w = GetSystemMetrics(SM_CXSCREEN);
     screen_h = GetSystemMetrics(SM_CYSCREEN);
@@ -1491,7 +1604,11 @@ static void setup_fullscreen_window(void) {
     SetWindowPos(g_hwnd, HWND_TOP, 0, 0, screen_w, screen_h,
                  SWP_SHOWWINDOW);
 
-    rdd_log("setup_fullscreen_window: %dx%d", screen_w, screen_h);
+    g_is_fullscreen = TRUE;
+    rdd_log("setup_fullscreen_window: %dx%d (saved orig %ldx%ld)",
+            screen_w, screen_h,
+            g_orig_rect.right - g_orig_rect.left,
+            g_orig_rect.bottom - g_orig_rect.top);
 }
 
 static HRESULT WINAPI DD4_SetDisplayMode(DD4Obj *self, DWORD w, DWORD h, DWORD bpp,
@@ -1907,6 +2024,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         DisableThreadLibraryCalls(hinstDLL);
         rdd_log("=== revenant_ddraw loaded ===");
     } else if (fdwReason == DLL_PROCESS_DETACH) {
+        restore_window();
         rdd_log("=== revenant_ddraw unloaded ===");
         if (g_logfile) { fclose(g_logfile); g_logfile = NULL; }
         if (g_present_buf) { free(g_present_buf); g_present_buf = NULL; }

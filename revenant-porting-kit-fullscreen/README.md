@@ -95,13 +95,18 @@ The game renders at 640x480 and the custom DLL scales the output to fill the ent
 
 ## Current State
 
-The game launches, renders menus and cinematics in fullscreen, and gameplay loads successfully. The 3D viewport renders with characters, environments, and UI elements visible. The following issues remain:
+The game launches, renders menus and cinematics in fullscreen, and gameplay loads successfully. The 3D viewport renders with characters, environments, and UI elements visible. The following fixes have been applied:
 
-- **Pink/magenta rendering artifacts.** Some UI regions (HUD corners, inventory panel edges) render with bright pink (RGB 255,0,255) instead of transparency. This is the standard color key value the game uses for transparent regions. The custom DLL's `Blt`/`BltFast` implementation does not yet handle source color key transparency (`DDBLT_KEYSRC` / `DDBLTFAST_SRCCOLORKEY`), so pixels that should be transparent are drawn as solid magenta.
-- **Save game menu does not open.** During gameplay, pressing Escape and clicking "Save Game" does not open the save dialog. This is likely caused by the DLL not handling a child surface, overlay, or dialog-related DirectDraw call that the save UI depends on.
-- **Exit game freezes.** During gameplay, pressing Escape and clicking "Exit Game" freezes the game instead of exiting cleanly. This may be caused by a missing or broken `RestoreDisplayMode`, `SetCooperativeLevel(NORMAL)`, or window message handling during shutdown.
-- **Aspect ratio.** The game's 4:3 content is stretched to fill the screen. If the display is 16:10 or wider, there will be slight horizontal stretching.
-- **No Flip-based rendering.** The game uses `Blt` (not `Flip`) to present frames. The fullscreen scaling triggers on every `Blt` to the primary surface.
+- **Color key transparency (partial).** The custom DLL's `Blt` and `BltFast` implementations now handle source color key transparency (`DDBLT_KEYSRC`, `DDBLT_KEYSRCOVERRIDE`, `DDBLTFAST_SRCCOLORKEY`). Surfaces store their color key via `SetColorKey`, and pixels matching the key (typically magenta 0xF81F) are skipped during blits. This eliminated most of the pink/magenta artifacts in UI elements (HUD, inventory panel edges).
+- **Aspect ratio preservation.** The 4:3 game content is now displayed with correct proportions. On wider displays, black pillarbox bars appear on the left and right. On taller displays, letterbox bars appear on top and bottom.
+- **Exit game cleanup.** `RestoreDisplayMode` and `SetCooperativeLevel(DDSCL_NORMAL)` now restore the window to its original position and size. The presentation pipeline is guarded against calls during shutdown. The `DllMain` detach handler also restores the window as a safety net.
+
+The following issues remain:
+
+- **Pink/magenta halos around text.** Text rendered via GDI (`GetDC`/`ReleaseDC`) still shows magenta backgrounds around characters. The game draws text (character names, dialog, status messages) on surfaces with a magenta background, and when those surfaces are blitted, the magenta pixels around the text glyphs are not being treated as transparent. This affects labels like "Locke", "Level 1", dialog text like "Welcome back from...", and status text like "Locke entered The Keep".
+- **Save game menu does not open.** During gameplay, pressing Escape and clicking "Save Game" does not open the save dialog. The root cause is not yet identified.
+- **Exit game freezes.** During gameplay, pressing Escape and clicking "Exit Game" freezes the game instead of exiting cleanly. The window restoration code is in place but the freeze persists, suggesting the cause is elsewhere (possibly the game waiting on a condition that never completes, or a message queue deadlock).
+- **No Flip-based rendering.** The game uses `Blt` (not `Flip`) to present frames. The fullscreen scaling triggers on every `Blt` to the primary surface. This is working as expected.
 
 ## Troubleshooting
 
