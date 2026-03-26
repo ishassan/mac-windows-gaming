@@ -1,18 +1,22 @@
 /*
- * revenant_ddraw.c - Self-contained DirectDraw replacement for Revenant (1999)
+ * revenant_ddraw.c - DirectDraw proxy for Revenant (1999)
  *
- * Replaces Wine's DirectDraw entirely. Manages pixel buffers internally
- * and scales the game's 640x480x16 (RGB565) output to fill the window
- * via GDI StretchDIBits.
+ * Instead of reimplementing DirectDraw and Direct3D, this DLL loads Wine's
+ * real 32-bit ddraw from a sidecar ddraw_real.dll (falling back to the Wine
+ * system paths) and patches the COM objects in place. Only the methods needed
+ * for fullscreen presentation and window state tracking are intercepted; all
+ * rendering, surfaces, textures, GetDC, and D3D behaviour stay inside Wine.
  *
  * Build:
  *   i686-w64-mingw32-gcc -shared -o ddraw.dll revenant_ddraw.c ddraw_new.def \
- *       -lgdi32 -luser32 -lkernel32 -O2 -Wl,--enable-stdcall-fixup
+ *       -lgdi32 -luser32 -lkernel32 -lole32 -O2 -Wl,--enable-stdcall-fixup
  */
 
 #include <windows.h>
 #include <ddraw.h>
+#include <objbase.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -22,7 +26,8 @@
 
 static FILE *g_logfile = NULL;
 
-static void rdd_log(const char *fmt, ...) {
+static void rdd_log(const char *fmt, ...)
+{
     if (!g_logfile) g_logfile = fopen("revenant_ddraw.log", "a");
     if (g_logfile) {
         va_list ap;
@@ -35,41 +40,22 @@ static void rdd_log(const char *fmt, ...) {
 }
 
 /* ================================================================
- * GUIDs (defined manually to avoid INITGUID/mingw issues)
+ * GUIDs (defined manually to avoid INITGUID/linker issues)
  * ================================================================ */
 
-static int guid_eq(REFIID a, const GUID *b) {
+static int guid_eq(REFIID a, const GUID *b)
+{
     return memcmp(a, b, sizeof(GUID)) == 0;
 }
 
-static const GUID MY_IID_IUnknown =
-    {0x00000000,0x0000,0x0000,{0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
 static const GUID MY_IID_IDirectDraw =
     {0x6C14DB80,0xA733,0x11CE,{0xA5,0x21,0x00,0x20,0xAF,0x0B,0xE5,0x60}};
 static const GUID MY_IID_IDirectDraw2 =
     {0xB3A6F3E0,0x2B43,0x11CF,{0xA2,0xDE,0x00,0xAA,0x00,0xB9,0x33,0x56}};
+static const GUID MY_IID_IDirectDraw3 =
+    {0x618F8AD4,0x8B7A,0x11D0,{0x8F,0xCC,0x00,0xC0,0x4F,0xD9,0x18,0x9D}};
 static const GUID MY_IID_IDirectDraw4 =
     {0x9C59509A,0x39BD,0x11D1,{0x8C,0x4A,0x00,0xC0,0x4F,0xD9,0x30,0xC5}};
-static const GUID MY_IID_IDirect3D =
-    {0x3BBA0080,0x2421,0x11CF,{0xA3,0x1A,0x00,0xAA,0x00,0xB9,0x33,0x56}};
-static const GUID MY_IID_IDirect3D2 =
-    {0x6AAE1EC1,0x662A,0x11D0,{0x88,0x9D,0x00,0xAA,0x00,0xBB,0xB7,0x6A}};
-static const GUID MY_IID_IDirect3D3 =
-    {0xBB223240,0xE72B,0x11D0,{0xA9,0xB4,0x00,0xAA,0x00,0xC0,0x99,0x3E}};
-static const GUID MY_IID_IDirect3D7 =
-    {0xF5049E77,0x4861,0x11D2,{0xA4,0x07,0x00,0xA0,0xC9,0x06,0x29,0xA8}};
-static const GUID MY_IID_IDirect3DViewport =
-    {0x4417C146,0x33AD,0x11CF,{0x81,0x6F,0x00,0x00,0xC0,0x20,0x15,0x6E}};
-static const GUID MY_IID_IDirect3DViewport2 =
-    {0x93281501,0x8CF8,0x11D0,{0x89,0xAB,0x00,0xA0,0xC9,0x05,0x41,0x29}};
-static const GUID MY_IID_IDirect3DViewport3 =
-    {0xB0AB3B61,0x33D7,0x11D1,{0xA9,0x81,0x00,0xC0,0x4F,0xD7,0xB1,0x74}};
-static const GUID MY_IID_IDirect3DDevice3 =
-    {0xB0AB3B60,0x33D7,0x11D1,{0xA9,0x81,0x00,0xC0,0x4F,0xD7,0xB1,0x74}};
-static const GUID MY_IID_IDirect3DTexture =
-    {0x2CDCD9E0,0x25A0,0x11CF,{0xA3,0x1A,0x00,0xAA,0x00,0xB9,0x33,0x56}};
-static const GUID MY_IID_IDirect3DTexture2 =
-    {0x93281502,0x8CF8,0x11D0,{0x89,0xAB,0x00,0xA0,0xC9,0x05,0x41,0x29}};
 static const GUID MY_IID_IDirectDrawSurface =
     {0x6C14DB81,0xA733,0x11CE,{0xA5,0x21,0x00,0x20,0xAF,0x0B,0xE5,0x60}};
 static const GUID MY_IID_IDirectDrawSurface2 =
@@ -80,73 +66,175 @@ static const GUID MY_IID_IDirectDrawSurface4 =
     {0x0B2B8630,0xAD35,0x11D0,{0x8E,0xA6,0x00,0x60,0x97,0x97,0xEA,0x5B}};
 
 /* ================================================================
- * Forward declarations
+ * Real ddraw exports
  * ================================================================ */
 
-typedef struct RDDSurfaceVtbl RDDSurfaceVtbl;
-typedef struct RDDSurface RDDSurface;
-typedef struct DD4Vtbl DD4Vtbl;
-typedef struct DD1Vtbl DD1Vtbl;
-typedef struct DD4Obj DD4Obj;
-typedef struct DD1Obj DD1Obj;
+typedef HRESULT (WINAPI *PFN_DirectDrawCreate)(GUID *, LPDIRECTDRAW *, IUnknown *);
+typedef HRESULT (WINAPI *PFN_DirectDrawCreateEx)(GUID *, void **, REFIID, IUnknown *);
+typedef HRESULT (WINAPI *PFN_DirectDrawCreateClipper)(DWORD, LPDIRECTDRAWCLIPPER *, IUnknown *);
+typedef HRESULT (WINAPI *PFN_DirectDrawEnumerateA)(LPDDENUMCALLBACKA, void *);
+typedef HRESULT (WINAPI *PFN_DirectDrawEnumerateExA)(LPDDENUMCALLBACKEXA, void *, DWORD);
+typedef HRESULT (WINAPI *PFN_DirectDrawEnumerateW)(LPDDENUMCALLBACKW, void *);
+typedef HRESULT (WINAPI *PFN_DirectDrawEnumerateExW)(LPDDENUMCALLBACKEXW, void *, DWORD);
+
+static HMODULE g_real_ddraw = NULL;
+static HMODULE g_self_module = NULL;
+static PFN_DirectDrawCreate g_real_DirectDrawCreate = NULL;
+static PFN_DirectDrawCreateEx g_real_DirectDrawCreateEx = NULL;
+static PFN_DirectDrawCreateClipper g_real_DirectDrawCreateClipper = NULL;
+static PFN_DirectDrawEnumerateA g_real_DirectDrawEnumerateA = NULL;
+static PFN_DirectDrawEnumerateExA g_real_DirectDrawEnumerateExA = NULL;
+static PFN_DirectDrawEnumerateW g_real_DirectDrawEnumerateW = NULL;
+static PFN_DirectDrawEnumerateExW g_real_DirectDrawEnumerateExW = NULL;
 
 /* ================================================================
- * Types
- * ================================================================ */
-
-typedef enum { SURF_PRIMARY, SURF_BACKBUFFER, SURF_OFFSCREEN } SurfType;
-
-struct RDDSurface {
-    RDDSurfaceVtbl *lpVtbl;
-    ULONG refcount;
-    SurfType type;
-    DWORD width, height, bpp;
-    LONG pitch;
-    BYTE *pixels;
-    BOOL locked;
-    RDDSurface *back_buffer;    /* primary -> back */
-    DWORD caps;
-    DDPIXELFORMAT pixfmt;  /* actual pixel format from CreateSurface */
-    DDCOLORKEY src_color_key;
-    BOOL has_src_color_key;
-    /* GetDC state */
-    HDC hdc_mem;
-    HBITMAP hdc_bmp;
-    void *hdc_bits;
-};
-
-struct DD4Obj { DD4Vtbl *lpVtbl; };
-struct DD1Obj { DD1Vtbl *lpVtbl; };
-
-/* ================================================================
- * Global state
+ * Global fullscreen state
  * ================================================================ */
 
 static HWND g_hwnd = NULL;
-static RDDSurface *g_primary = NULL;
+static RECT g_orig_rect = {0};
+static BOOL g_is_fullscreen = FALSE;
 static DWORD *g_present_buf = NULL;
 static DWORD g_rgb565_lut[65536];
 static BITMAPINFO g_bmi;
-static ULONG g_dd_refcount = 0;
-static DD4Obj g_dd4;
-static DD1Obj g_dd1;
-static BOOL g_initialized = FALSE;
-static RDDSurface *g_render_target = NULL;
-static RECT g_orig_rect = {0};
-static BOOL g_is_fullscreen = FALSE;
-
-static void restore_window(void);
+static int g_surface_proxy_install_logs = 0;
+static int g_surface_proxy_release_logs = 0;
+static int g_present_log_count = 0;
 
 /* ================================================================
- * Presentation: RGB565 LUT + StretchDIBits
+ * Proxy registry
  * ================================================================ */
 
-static void init_lut(void) {
+typedef enum {
+    PROXY_DD1,
+    PROXY_DD2,
+    PROXY_DD3,
+    PROXY_DD4,
+    PROXY_SURF1,
+    PROXY_SURF2,
+    PROXY_SURF3,
+    PROXY_SURF4
+} ProxyKind;
+
+typedef struct ProxyEntry ProxyEntry;
+struct ProxyEntry {
+    void *iface;
+    ProxyKind kind;
+    void **orig_vtbl;
+    void **proxy_vtbl;
+    ProxyEntry *next;
+};
+
+typedef struct GenericIface {
+    void **lpVtbl;
+} GenericIface;
+
+static CRITICAL_SECTION g_proxy_lock;
+static BOOL g_proxy_lock_ready = FALSE;
+static ProxyEntry *g_proxy_list = NULL;
+
+/* ================================================================
+ * Helpers
+ * ================================================================ */
+
+static const char *proxy_kind_name(ProxyKind kind)
+{
+    switch (kind) {
+    case PROXY_DD1: return "DD1";
+    case PROXY_DD2: return "DD2";
+    case PROXY_DD3: return "DD3";
+    case PROXY_DD4: return "DD4";
+    case PROXY_SURF1: return "SURF1";
+    case PROXY_SURF2: return "SURF2";
+    case PROXY_SURF3: return "SURF3";
+    case PROXY_SURF4: return "SURF4";
+    default: return "UNKNOWN";
+    }
+}
+
+static size_t proxy_vtbl_count(ProxyKind kind)
+{
+    switch (kind) {
+    case PROXY_DD1: return 23;
+    case PROXY_DD2: return 24;
+    case PROXY_DD3: return 25;
+    case PROXY_DD4: return 28;
+    case PROXY_SURF1: return 36;
+    case PROXY_SURF2: return 39;
+    case PROXY_SURF3: return 40;
+    case PROXY_SURF4: return 45;
+    default: return 0;
+    }
+}
+
+static BOOL is_surface_kind(ProxyKind kind)
+{
+    return kind == PROXY_SURF1 || kind == PROXY_SURF2 ||
+           kind == PROXY_SURF3 || kind == PROXY_SURF4;
+}
+
+static BOOL dd_kind_from_iid(REFIID riid, ProxyKind *kind)
+{
+    if (guid_eq(riid, &MY_IID_IDirectDraw)) { *kind = PROXY_DD1; return TRUE; }
+    if (guid_eq(riid, &MY_IID_IDirectDraw2)) { *kind = PROXY_DD2; return TRUE; }
+    if (guid_eq(riid, &MY_IID_IDirectDraw3)) { *kind = PROXY_DD3; return TRUE; }
+    if (guid_eq(riid, &MY_IID_IDirectDraw4)) { *kind = PROXY_DD4; return TRUE; }
+    return FALSE;
+}
+
+static BOOL surface_kind_from_iid(REFIID riid, ProxyKind *kind)
+{
+    if (guid_eq(riid, &MY_IID_IDirectDrawSurface)) { *kind = PROXY_SURF1; return TRUE; }
+    if (guid_eq(riid, &MY_IID_IDirectDrawSurface2)) { *kind = PROXY_SURF2; return TRUE; }
+    if (guid_eq(riid, &MY_IID_IDirectDrawSurface3)) { *kind = PROXY_SURF3; return TRUE; }
+    if (guid_eq(riid, &MY_IID_IDirectDrawSurface4)) { *kind = PROXY_SURF4; return TRUE; }
+    return FALSE;
+}
+
+static ProxyEntry *find_proxy_locked(void *iface)
+{
+    ProxyEntry *entry;
+    for (entry = g_proxy_list; entry; entry = entry->next)
+        if (entry->iface == iface) return entry;
+    return NULL;
+}
+
+static ProxyEntry *find_proxy(void *iface)
+{
+    ProxyEntry *entry;
+    if (!g_proxy_lock_ready) return NULL;
+    EnterCriticalSection(&g_proxy_lock);
+    entry = find_proxy_locked(iface);
+    LeaveCriticalSection(&g_proxy_lock);
+    return entry;
+}
+
+static void remove_proxy(void *iface)
+{
+    ProxyEntry **pp;
+    if (!g_proxy_lock_ready) return;
+    EnterCriticalSection(&g_proxy_lock);
+    pp = &g_proxy_list;
+    while (*pp) {
+        ProxyEntry *entry = *pp;
+        if (entry->iface == iface) {
+            *pp = entry->next;
+            if (entry->proxy_vtbl) free(entry->proxy_vtbl);
+            free(entry);
+            break;
+        }
+        pp = &entry->next;
+    }
+    LeaveCriticalSection(&g_proxy_lock);
+}
+
+static void init_lut(void)
+{
     int i;
-    for (i = 0; i < 65536; i++) {
+    for (i = 0; i < 65536; ++i) {
         DWORD r5 = (i >> 11) & 0x1F;
-        DWORD g6 = (i >> 5)  & 0x3F;
-        DWORD b5 =  i        & 0x1F;
+        DWORD g6 = (i >> 5) & 0x3F;
+        DWORD b5 = i & 0x1F;
         DWORD r8 = (r5 << 3) | (r5 >> 2);
         DWORD g8 = (g6 << 2) | (g6 >> 4);
         DWORD b8 = (b5 << 3) | (b5 >> 2);
@@ -154,30 +242,179 @@ static void init_lut(void) {
     }
 }
 
-static void init_bmi(void) {
+static void init_bmi(void)
+{
     memset(&g_bmi, 0, sizeof(g_bmi));
     g_bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     g_bmi.bmiHeader.biWidth = 640;
-    g_bmi.bmiHeader.biHeight = -480;    /* top-down */
+    g_bmi.bmiHeader.biHeight = -480;
     g_bmi.bmiHeader.biPlanes = 1;
     g_bmi.bmiHeader.biBitCount = 32;
     g_bmi.bmiHeader.biCompression = BI_RGB;
 }
 
-static void present_frame(RDDSurface *primary) {
+static void ensure_present_state(void)
+{
+    if (!g_present_buf) g_present_buf = (DWORD *)calloc(640 * 480, sizeof(DWORD));
+}
+
+static FARPROC resolve_export(const char *name)
+{
+    FARPROC proc = NULL;
+    if (!g_real_ddraw) return NULL;
+    proc = GetProcAddress(g_real_ddraw, name);
+    if (!proc) rdd_log("resolve_export failed: %s", name);
+    return proc;
+}
+
+#define ASSIGN_EXPORT(var, name) \
+    do { \
+        union { FARPROC raw; __typeof__(var) typed; } export_cast; \
+        export_cast.raw = resolve_export(name); \
+        (var) = export_cast.typed; \
+    } while (0)
+
+static BOOL load_real_ddraw(void)
+{
+    char path[MAX_PATH];
+    char module_path[MAX_PATH];
+    char *slash;
+    if (g_real_ddraw) return TRUE;
+
+    memset(path, 0, sizeof(path));
+    memset(module_path, 0, sizeof(module_path));
+
+    if (g_self_module &&
+        GetModuleFileNameA(g_self_module, module_path, sizeof(module_path)) > 0) {
+        slash = strrchr(module_path, '\\');
+        if (slash) {
+            *(slash + 1) = '\0';
+            snprintf(path, sizeof(path), "%sddraw_real.dll", module_path);
+            g_real_ddraw = LoadLibraryA(path);
+            if (!g_real_ddraw)
+                rdd_log("LoadLibraryA failed for %s: %lu", path, GetLastError());
+        }
+    }
+
+    if (!g_real_ddraw) {
+        strcpy(path, "C:\\windows\\syswow64\\ddraw.dll");
+        g_real_ddraw = LoadLibraryA(path);
+        if (!g_real_ddraw)
+            rdd_log("LoadLibraryA failed for %s: %lu", path, GetLastError());
+    }
+
+    if (!g_real_ddraw) {
+        UINT len = GetSystemDirectoryA(module_path, sizeof(module_path));
+        if (!len || len >= sizeof(module_path) - 12) {
+            rdd_log("GetSystemDirectoryA failed: %lu", GetLastError());
+            return FALSE;
+        }
+        snprintf(path, sizeof(path), "%s\\ddraw.dll", module_path);
+        g_real_ddraw = LoadLibraryA(path);
+        if (!g_real_ddraw)
+            rdd_log("LoadLibraryA failed for %s: %lu", path, GetLastError());
+    }
+
+    if (!g_real_ddraw) {
+        rdd_log("LoadLibraryA failed for real ddraw");
+        return FALSE;
+    }
+
+    ASSIGN_EXPORT(g_real_DirectDrawCreate, "DirectDrawCreate");
+    ASSIGN_EXPORT(g_real_DirectDrawCreateEx, "DirectDrawCreateEx");
+    ASSIGN_EXPORT(g_real_DirectDrawCreateClipper, "DirectDrawCreateClipper");
+    ASSIGN_EXPORT(g_real_DirectDrawEnumerateA, "DirectDrawEnumerateA");
+    ASSIGN_EXPORT(g_real_DirectDrawEnumerateExA, "DirectDrawEnumerateExA");
+    ASSIGN_EXPORT(g_real_DirectDrawEnumerateW, "DirectDrawEnumerateW");
+    ASSIGN_EXPORT(g_real_DirectDrawEnumerateExW, "DirectDrawEnumerateExW");
+
+    if (!g_real_DirectDrawCreate || !g_real_DirectDrawCreateEx ||
+        !g_real_DirectDrawCreateClipper || !g_real_DirectDrawEnumerateA ||
+        !g_real_DirectDrawEnumerateExA || !g_real_DirectDrawEnumerateW ||
+        !g_real_DirectDrawEnumerateExW) {
+        return FALSE;
+    }
+
+    rdd_log("Loaded real ddraw successfully");
+    return TRUE;
+}
+
+static void restore_window(void)
+{
+    if (!g_is_fullscreen || !g_hwnd || !IsWindow(g_hwnd)) return;
+
+    g_is_fullscreen = FALSE;
+    SetWindowPos(g_hwnd, HWND_NOTOPMOST,
+                 g_orig_rect.left, g_orig_rect.top,
+                 g_orig_rect.right - g_orig_rect.left,
+                 g_orig_rect.bottom - g_orig_rect.top,
+                 SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS);
+    rdd_log("restore_window");
+}
+
+static void setup_fullscreen_window(void)
+{
+    int screen_w, screen_h;
+
+    if (!g_hwnd || !IsWindow(g_hwnd)) return;
+
+    if (!g_is_fullscreen)
+        GetWindowRect(g_hwnd, &g_orig_rect);
+
+    screen_w = GetSystemMetrics(SM_CXSCREEN);
+    screen_h = GetSystemMetrics(SM_CYSCREEN);
+
+    SetWindowPos(g_hwnd, HWND_TOP, 0, 0, screen_w, screen_h,
+                 SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS);
+    g_is_fullscreen = TRUE;
+    rdd_log("setup_fullscreen_window: %dx%d", screen_w, screen_h);
+}
+
+static int mask_shift(DWORD mask)
+{
+    int shift = 0;
+    if (!mask) return 0;
+    while ((mask & 1u) == 0u) {
+        mask >>= 1;
+        ++shift;
+    }
+    return shift;
+}
+
+static BYTE expand_component(DWORD pixel, DWORD mask)
+{
+    DWORD raw, max_value;
+    int shift;
+
+    if (!mask) return 0;
+    shift = mask_shift(mask);
+    raw = (pixel & mask) >> shift;
+    max_value = mask >> shift;
+    if (!max_value) return 0;
+    return (BYTE)((raw * 255u + max_value / 2u) / max_value);
+}
+
+static DWORD load_pixel(const BYTE *src, DWORD bpp)
+{
+    switch (bpp) {
+    case 16:
+        return *(const WORD *)src;
+    case 24:
+        return (DWORD)src[0] | ((DWORD)src[1] << 8) | ((DWORD)src[2] << 16);
+    case 32:
+        return *(const DWORD *)src;
+    default:
+        return 0;
+    }
+}
+
+static void present_buffer(void)
+{
     RECT rc;
     HDC hdc;
-    int count, i;
-    WORD *src;
     int win_w, win_h, dest_w, dest_h, dest_x, dest_y;
 
-    if (!g_hwnd || !primary || !primary->pixels || !g_present_buf) return;
-
-    /* Convert RGB565 -> BGR8888 */
-    src = (WORD *)primary->pixels;
-    count = (int)(primary->width * primary->height);
-    for (i = 0; i < count; i++)
-        g_present_buf[i] = g_rgb565_lut[src[i]];
+    if (!g_hwnd || !g_present_buf || !IsWindow(g_hwnd)) return;
 
     GetClientRect(g_hwnd, &rc);
     win_w = rc.right;
@@ -187,22 +424,18 @@ static void present_frame(RDDSurface *primary) {
     hdc = GetDC(g_hwnd);
     if (!hdc) return;
 
-    /* Compute centered 4:3 rectangle preserving aspect ratio */
     if (win_w * 3 > win_h * 4) {
-        /* Window wider than 4:3: pillarbox (black bars left/right) */
         dest_h = win_h;
         dest_w = win_h * 4 / 3;
         dest_x = (win_w - dest_w) / 2;
         dest_y = 0;
     } else {
-        /* Window taller than 4:3: letterbox (black bars top/bottom) */
         dest_w = win_w;
         dest_h = win_w * 3 / 4;
         dest_x = 0;
         dest_y = (win_h - dest_h) / 2;
     }
 
-    /* Fill black bars */
     if (dest_x > 0 || dest_y > 0) {
         HBRUSH black = (HBRUSH)GetStockObject(BLACK_BRUSH);
         if (dest_x > 0) {
@@ -223,1944 +456,948 @@ static void present_frame(RDDSurface *primary) {
     SetBrushOrgEx(hdc, 0, 0, NULL);
     StretchDIBits(hdc,
         dest_x, dest_y, dest_w, dest_h,
-        0, 0, (int)primary->width, (int)primary->height,
+        0, 0, 640, 480,
         g_present_buf, &g_bmi, DIB_RGB_COLORS, SRCCOPY);
 
     ReleaseDC(g_hwnd, hdc);
 }
 
-/* ================================================================
- * Helpers
- * ================================================================ */
+typedef struct SurfaceSnapshot {
+    BYTE *bits;
+    LONG pitch;
+    DWORD width;
+    DWORD height;
+    DDPIXELFORMAT pf;
+    ProxyKind kind;
+    void *iface;
+} SurfaceSnapshot;
 
-static void fill_pixelformat_rgb565(DDPIXELFORMAT *pf) {
-    memset(pf, 0, sizeof(*pf));
-    pf->dwSize = sizeof(DDPIXELFORMAT);
-    pf->dwFlags = DDPF_RGB;
-    pf->dwRGBBitCount = 16;
-    pf->dwRBitMask = 0xF800;
-    pf->dwGBitMask = 0x07E0;
-    pf->dwBBitMask = 0x001F;
-}
-
-static void fill_surface_desc(RDDSurface *surf, DDSURFACEDESC2 *desc) {
-    memset(desc, 0, sizeof(*desc));
-    desc->dwSize = sizeof(DDSURFACEDESC2);
-    desc->dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH | DDSD_PIXELFORMAT | DDSD_CAPS;
-    desc->dwWidth = surf->width;
-    desc->dwHeight = surf->height;
-    desc->lPitch = surf->pitch;
-    desc->ddpfPixelFormat = surf->pixfmt;
-    desc->ddsCaps.dwCaps = surf->caps;
-}
-
-/* ================================================================
- * Surface allocation
- * ================================================================ */
-
-/* Forward-declared vtable instance */
-static RDDSurfaceVtbl g_surf_vtbl;
-
-static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDPIXELFORMAT *pf, DWORD req_caps) {
-    RDDSurface *s = (RDDSurface *)calloc(1, sizeof(RDDSurface));
-    if (!s) return NULL;
-    s->lpVtbl = &g_surf_vtbl;
-    s->refcount = 1;
-    s->type = type;
-    s->width = w;
-    s->height = h;
-    s->bpp = bpp;
-    s->pitch = (LONG)(((w * bpp + 63) & ~63) >> 3);
-    s->pixels = (BYTE *)calloc(1, (size_t)(s->pitch * h));
-    if (pf) {
-        s->pixfmt = *pf;
-    } else {
-        fill_pixelformat_rgb565(&s->pixfmt);
+static BOOL surface_is_primary(void *iface, ProxyKind kind)
+{
+    HRESULT hr;
+    if (kind == PROXY_SURF4) {
+        DDSCAPS2 caps;
+        memset(&caps, 0, sizeof(caps));
+        hr = IDirectDrawSurface4_GetCaps((LPDIRECTDRAWSURFACE4)iface, &caps);
+        return SUCCEEDED(hr) && (caps.dwCaps & DDSCAPS_PRIMARYSURFACE);
     }
 
-    switch (type) {
-    case SURF_PRIMARY:
-        s->caps = DDSCAPS_PRIMARYSURFACE | DDSCAPS_FLIP | DDSCAPS_COMPLEX | DDSCAPS_VISIBLE;
-        break;
-    case SURF_BACKBUFFER:
-        s->caps = DDSCAPS_BACKBUFFER | DDSCAPS_FLIP | DDSCAPS_COMPLEX;
-        break;
-    case SURF_OFFSCREEN:
-        s->caps = req_caps ? req_caps : (DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY);
-        break;
+    if (kind == PROXY_SURF1 || kind == PROXY_SURF2 || kind == PROXY_SURF3) {
+        DDSCAPS caps;
+        memset(&caps, 0, sizeof(caps));
+        if (kind == PROXY_SURF1)
+            hr = IDirectDrawSurface_GetCaps((LPDIRECTDRAWSURFACE)iface, &caps);
+        else if (kind == PROXY_SURF2)
+            hr = IDirectDrawSurface2_GetCaps((LPDIRECTDRAWSURFACE2)iface, &caps);
+        else
+            hr = IDirectDrawSurface3_GetCaps((LPDIRECTDRAWSURFACE3)iface, &caps);
+        return SUCCEEDED(hr) && (caps.dwCaps & DDSCAPS_PRIMARYSURFACE);
     }
 
-    rdd_log("alloc_surface: %dx%dx%d type=%d pitch=%d", w, h, bpp, type, s->pitch);
-    return s;
+    return FALSE;
 }
 
-/* ================================================================
- * IDirectDrawSurface4 methods (45 total)
- * ================================================================ */
+static HRESULT lock_surface_snapshot(void *iface, ProxyKind kind, SurfaceSnapshot *snap)
+{
+    HRESULT hr;
+    memset(snap, 0, sizeof(*snap));
+    snap->kind = kind;
+    snap->iface = iface;
 
-/* ================================================================
- * IDirect3DTexture2 stub (6 methods)
- * Returned when surfaces are QI'd for texture interface.
- * ================================================================ */
-
-typedef struct D3DTexObj D3DTexObj;
-struct D3DTexObj { void **lpVtbl; RDDSurface *surf; };
-
-static HRESULT WINAPI D3DTex_QI(D3DTexObj *s, REFIID r, void **o) { (void)s; (void)r; *o = NULL; return E_NOINTERFACE; }
-static ULONG WINAPI D3DTex_AddRef(D3DTexObj *s) { (void)s; return 2; }
-static ULONG WINAPI D3DTex_Release(D3DTexObj *s) { (void)s; return 1; }
-static HRESULT WINAPI D3DTex_GetHandle(D3DTexObj *s, void *dev, void *handle) {
-    (void)dev;
-    *(DWORD *)handle = (DWORD)(void *)s->surf;
-    rdd_log("D3DTex_GetHandle: surf=%p handle=0x%lx", (void*)s->surf, (unsigned long)(DWORD)(void*)s->surf);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DTex_PaletteChanged(D3DTexObj *s, void *a, void *b) { rdd_log("D3DTex_PaletteChanged"); (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DTex_Load(D3DTexObj *s, void *src_tex) {
-    rdd_log("D3DTex_Load: dst=%p src=%p", (void*)s->surf, src_tex);
-    /* Copy pixel data from source texture surface to destination */
-    if (src_tex) {
-        D3DTexObj *src = (D3DTexObj *)src_tex;
-        if (src->surf && s->surf &&
-            src->surf->width == s->surf->width &&
-            src->surf->height == s->surf->height) {
-            /* Copy row-by-row to handle pitch mismatches between surfaces */
-            DWORD y;
-            LONG row_bytes = (LONG)(s->surf->width * (s->surf->bpp / 8));
-            for (y = 0; y < s->surf->height; y++) {
-                memcpy(s->surf->pixels + y * s->surf->pitch,
-                       src->surf->pixels + y * src->surf->pitch,
-                       (size_t)row_bytes);
-            }
-            rdd_log("D3DTex_Load: copied %lux%lu pixels (src_pitch=%ld dst_pitch=%ld)",
-                    s->surf->width, s->surf->height, src->surf->pitch, s->surf->pitch);
-        } else if (src->surf && s->surf) {
-            rdd_log("D3DTex_Load: dimension mismatch dst=%lux%lu src=%lux%lu",
-                    s->surf->width, s->surf->height, src->surf->width, src->surf->height);
-        }
-    }
-    return DD_OK;
-}
-
-static void *g_d3dtex_vtbl[6] = {
-    D3DTex_QI, D3DTex_AddRef, D3DTex_Release,
-    D3DTex_GetHandle,      /* 3 */
-    D3DTex_PaletteChanged, /* 4 */
-    D3DTex_Load            /* 5 */
-};
-
-/* Pool of texture objects (surfaces can be QI'd for texture) */
-#define MAX_TEX_OBJS 512
-static D3DTexObj g_tex_pool[MAX_TEX_OBJS];
-static int g_tex_count = 0;
-
-static D3DTexObj *get_tex_for_surface(RDDSurface *surf) {
-    int i;
-    for (i = 0; i < g_tex_count; i++)
-        if (g_tex_pool[i].surf == surf) return &g_tex_pool[i];
-    if (g_tex_count < MAX_TEX_OBJS) {
-        D3DTexObj *t = &g_tex_pool[g_tex_count++];
-        t->lpVtbl = g_d3dtex_vtbl;
-        t->surf = surf;
-        return t;
-    }
-    rdd_log("ERROR: texture pool exhausted (%d/%d)", g_tex_count, MAX_TEX_OBJS);
-    return NULL;
-}
-
-/* --- IUnknown --- */
-
-static HRESULT WINAPI Surf_QueryInterface(RDDSurface *self, REFIID riid, void **out) {
-    if (guid_eq(riid, &MY_IID_IDirectDrawSurface) ||
-        guid_eq(riid, &MY_IID_IDirectDrawSurface2) ||
-        guid_eq(riid, &MY_IID_IDirectDrawSurface3) ||
-        guid_eq(riid, &MY_IID_IDirectDrawSurface4) ||
-        guid_eq(riid, &MY_IID_IUnknown)) {
-        self->refcount++;
-        *out = self;
-        return S_OK;
-    }
-    if (guid_eq(riid, &MY_IID_IDirect3DTexture) ||
-        guid_eq(riid, &MY_IID_IDirect3DTexture2)) {
-        D3DTexObj *tex = get_tex_for_surface(self);
-        if (tex) { *out = tex; return S_OK; }
-    }
-    *out = NULL;
-    rdd_log("Surf_QI: unknown {%08lx...}", (unsigned long)riid->Data1);
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI Surf_AddRef(RDDSurface *self) {
-    return ++self->refcount;
-}
-
-static ULONG WINAPI Surf_Release(RDDSurface *self) {
-    ULONG ref = --self->refcount;
-    if (ref == 0) {
-        rdd_log("Surf_Release: freeing surface type=%d", self->type);
-        if (self->pixels) free(self->pixels);
-        if (self->back_buffer) {
-            /* Also free the back buffer if we own it */
-            if (self->back_buffer->pixels) free(self->back_buffer->pixels);
-            free(self->back_buffer);
-        }
-        if (g_primary == self) g_primary = NULL;
-        free(self);
-    }
-    return ref;
-}
-
-/* --- Stubs (simple returns) --- */
-
-static HRESULT WINAPI Surf_AddAttachedSurface(RDDSurface *s, RDDSurface *a)
-    { rdd_log("Surf_AddAttachedSurface: self_type=%d attached_caps=0x%lx", s->type, a ? a->caps : 0); return DD_OK; }
-static HRESULT WINAPI Surf_AddOverlayDirtyRect(RDDSurface *s, LPRECT r)
-    { (void)s; (void)r; return DD_OK; }
-static HRESULT WINAPI Surf_BltBatch(RDDSurface *s, void *b, DWORD c, DWORD d)
-    { rdd_log("Surf_BltBatch: UNSUPPORTED"); (void)s; (void)b; (void)c; (void)d; return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI Surf_DeleteAttachedSurface(RDDSurface *s, DWORD f, RDDSurface *a)
-    { (void)s; (void)f; (void)a; return DD_OK; }
-static HRESULT WINAPI Surf_EnumOverlayZOrders(RDDSurface *s, DWORD f, void *c, void *cb)
-    { (void)s; (void)f; (void)c; (void)cb; return DD_OK; }
-static HRESULT WINAPI Surf_GetBltStatus(RDDSurface *s, DWORD f)
-    { (void)s; (void)f; return DD_OK; }
-static HRESULT WINAPI Surf_GetClipper(RDDSurface *s, void **c)
-    { (void)s; *c = NULL; return DDERR_NOCLIPPERATTACHED; }
-static HRESULT WINAPI Surf_GetColorKey(RDDSurface *s, DWORD f, LPDDCOLORKEY k) {
-    if ((f & DDCKEY_SRCBLT) && s->has_src_color_key) {
-        *k = s->src_color_key;
+    if (kind == PROXY_SURF4) {
+        DDSURFACEDESC2 desc;
+        memset(&desc, 0, sizeof(desc));
+        desc.dwSize = sizeof(desc);
+        hr = IDirectDrawSurface4_Lock((LPDIRECTDRAWSURFACE4)iface, NULL, &desc,
+                                      DDLOCK_WAIT | DDLOCK_READONLY, NULL);
+        if (FAILED(hr)) return hr;
+        snap->bits = (BYTE *)desc.lpSurface;
+        snap->pitch = desc.lPitch;
+        snap->width = desc.dwWidth;
+        snap->height = desc.dwHeight;
+        snap->pf = desc.ddpfPixelFormat;
         return DD_OK;
     }
-    return DDERR_NOCOLORKEY;
+
+    {
+        DDSURFACEDESC desc;
+        memset(&desc, 0, sizeof(desc));
+        desc.dwSize = sizeof(desc);
+
+        if (kind == PROXY_SURF1)
+            hr = IDirectDrawSurface_Lock((LPDIRECTDRAWSURFACE)iface, NULL, &desc,
+                                         DDLOCK_WAIT | DDLOCK_READONLY, NULL);
+        else if (kind == PROXY_SURF2)
+            hr = IDirectDrawSurface2_Lock((LPDIRECTDRAWSURFACE2)iface, NULL, &desc,
+                                          DDLOCK_WAIT | DDLOCK_READONLY, NULL);
+        else
+            hr = IDirectDrawSurface3_Lock((LPDIRECTDRAWSURFACE3)iface, NULL, &desc,
+                                          DDLOCK_WAIT | DDLOCK_READONLY, NULL);
+        if (FAILED(hr)) return hr;
+
+        snap->bits = (BYTE *)desc.lpSurface;
+        snap->pitch = desc.lPitch;
+        snap->width = desc.dwWidth;
+        snap->height = desc.dwHeight;
+        snap->pf = desc.ddpfPixelFormat;
+        return DD_OK;
+    }
 }
-static HRESULT WINAPI Surf_GetDC(RDDSurface *s, HDC *hdc) {
-    HDC screen_dc, mem_dc;
-    BITMAPINFO bmi;
-    HBITMAP bmp;
-    void *bits;
+
+static void unlock_surface_snapshot(const SurfaceSnapshot *snap)
+{
+    if (!snap->iface) return;
+    if (snap->kind == PROXY_SURF4) {
+        IDirectDrawSurface4_Unlock((LPDIRECTDRAWSURFACE4)snap->iface, NULL);
+    } else if (snap->kind == PROXY_SURF1) {
+        IDirectDrawSurface_Unlock((LPDIRECTDRAWSURFACE)snap->iface, snap->bits);
+    } else if (snap->kind == PROXY_SURF2) {
+        IDirectDrawSurface2_Unlock((LPDIRECTDRAWSURFACE2)snap->iface, snap->bits);
+    } else if (snap->kind == PROXY_SURF3) {
+        IDirectDrawSurface3_Unlock((LPDIRECTDRAWSURFACE3)snap->iface, snap->bits);
+    }
+}
+
+static BOOL snapshot_to_present_buffer(const SurfaceSnapshot *snap)
+{
+    DWORD width, height, bpp;
+    BYTE *base;
+    LONG pitch;
     DWORD y;
 
-    screen_dc = GetDC(NULL);
-    mem_dc = CreateCompatibleDC(screen_dc);
+    if (!snap->bits || !snap->pf.dwRGBBitCount) return FALSE;
+    if (!(snap->pf.dwFlags & DDPF_RGB) && snap->pf.dwRGBBitCount != 16) return FALSE;
+
+    ensure_present_state();
+    if (!g_present_buf) return FALSE;
+
+    memset(g_present_buf, 0, 640 * 480 * sizeof(DWORD));
+
+    width = snap->width ? snap->width : 640;
+    height = snap->height ? snap->height : 480;
+    if (width > 640) width = 640;
+    if (height > 480) height = 480;
+
+    bpp = snap->pf.dwRGBBitCount;
+    pitch = snap->pitch;
+    base = snap->bits;
+    if (pitch < 0)
+        base = snap->bits + (height - 1) * (size_t)(-pitch);
+
+    for (y = 0; y < height; ++y) {
+        const BYTE *src_row = base + y * pitch;
+        DWORD *dst_row = g_present_buf + y * 640;
+        DWORD x;
+
+        if (bpp == 16 &&
+            snap->pf.dwRBitMask == 0xF800 &&
+            snap->pf.dwGBitMask == 0x07E0 &&
+            snap->pf.dwBBitMask == 0x001F) {
+            const WORD *src16 = (const WORD *)src_row;
+            for (x = 0; x < width; ++x)
+                dst_row[x] = g_rgb565_lut[src16[x]];
+            continue;
+        }
+
+        if (bpp != 16 && bpp != 24 && bpp != 32) return FALSE;
+
+        for (x = 0; x < width; ++x) {
+            DWORD pixel = load_pixel(src_row + x * (bpp / 8), bpp);
+            BYTE r = expand_component(pixel, snap->pf.dwRBitMask);
+            BYTE g = expand_component(pixel, snap->pf.dwGBitMask);
+            BYTE b = expand_component(pixel, snap->pf.dwBBitMask);
+            dst_row[x] = (r << 16) | (g << 8) | b;
+        }
+    }
+
+    return TRUE;
+}
+
+static void log_present_event(const char *trigger, const char *path,
+                              const SurfaceSnapshot *snap, DWORD caps, HRESULT hr)
+{
+    if (g_present_log_count >= 16) return;
+    ++g_present_log_count;
+
+    if (snap) {
+        rdd_log("present[%d]: trigger=%s path=%s caps=0x%lx size=%lux%lu pitch=%ld bpp=%lu flags=0x%lx hr=0x%08lx",
+                g_present_log_count, trigger, path, (unsigned long)caps,
+                (unsigned long)snap->width, (unsigned long)snap->height,
+                snap->pitch, (unsigned long)snap->pf.dwRGBBitCount,
+                (unsigned long)snap->pf.dwFlags, (unsigned long)hr);
+    } else {
+        rdd_log("present[%d]: trigger=%s path=%s hr=0x%08lx",
+                g_present_log_count, trigger, path, (unsigned long)hr);
+    }
+}
+
+static DWORD get_surface_caps_value(void *iface, ProxyKind kind)
+{
+    HRESULT hr;
+
+    if (kind == PROXY_SURF4) {
+        DDSCAPS2 caps;
+        memset(&caps, 0, sizeof(caps));
+        hr = IDirectDrawSurface4_GetCaps((LPDIRECTDRAWSURFACE4)iface, &caps);
+        return SUCCEEDED(hr) ? caps.dwCaps : 0;
+    }
+
+    if (kind == PROXY_SURF1 || kind == PROXY_SURF2 || kind == PROXY_SURF3) {
+        DDSCAPS caps;
+        memset(&caps, 0, sizeof(caps));
+        if (kind == PROXY_SURF1)
+            hr = IDirectDrawSurface_GetCaps((LPDIRECTDRAWSURFACE)iface, &caps);
+        else if (kind == PROXY_SURF2)
+            hr = IDirectDrawSurface2_GetCaps((LPDIRECTDRAWSURFACE2)iface, &caps);
+        else
+            hr = IDirectDrawSurface3_GetCaps((LPDIRECTDRAWSURFACE3)iface, &caps);
+        return SUCCEEDED(hr) ? caps.dwCaps : 0;
+    }
+
+    return 0;
+}
+
+static BOOL capture_window_client_to_present_buffer(void)
+{
+    HDC window_dc = NULL, mem_dc = NULL;
+    HBITMAP dib = NULL;
+    void *bits = NULL;
+    BITMAPINFO bmi;
+    RECT rc;
+    int copy_w, copy_h;
+
+    if (!g_hwnd || !IsWindow(g_hwnd)) return FALSE;
+
+    ensure_present_state();
+    if (!g_present_buf) return FALSE;
+    memset(g_present_buf, 0, 640 * 480 * sizeof(DWORD));
+
+    GetClientRect(g_hwnd, &rc);
+    copy_w = rc.right;
+    copy_h = rc.bottom;
+    if (copy_w > 640) copy_w = 640;
+    if (copy_h > 480) copy_h = 480;
+    if (copy_w <= 0 || copy_h <= 0) return FALSE;
+
+    window_dc = GetDC(g_hwnd);
+    if (!window_dc) return FALSE;
+
+    mem_dc = CreateCompatibleDC(window_dc);
+    if (!mem_dc) goto done;
 
     memset(&bmi, 0, sizeof(bmi));
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = (LONG)s->width;
-    bmi.bmiHeader.biHeight = -(LONG)s->height;
+    bmi.bmiHeader.biWidth = 640;
+    bmi.bmiHeader.biHeight = -480;
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
 
-    bmp = CreateDIBSection(screen_dc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
-    ReleaseDC(NULL, screen_dc);
-    if (!bmp) { DeleteDC(mem_dc); *hdc = NULL; return DDERR_GENERIC; }
+    dib = CreateDIBSection(window_dc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!dib || !bits) goto done;
+    memset(bits, 0, 640 * 480 * sizeof(DWORD));
 
-    /* Convert surface RGB565 pixels to 32-bit DIB */
-    for (y = 0; y < s->height; y++) {
-        WORD *src = (WORD *)(s->pixels + y * s->pitch);
-        DWORD *dst = (DWORD *)((BYTE *)bits + y * s->width * 4);
-        DWORD x;
-        for (x = 0; x < s->width; x++) {
-            WORD p = src[x];
-            DWORD r = ((p >> 11) & 0x1F); r = (r << 3) | (r >> 2);
-            DWORD g = ((p >> 5) & 0x3F); g = (g << 2) | (g >> 4);
-            DWORD b = (p & 0x1F); b = (b << 3) | (b >> 2);
-            dst[x] = (r << 16) | (g << 8) | b;
-        }
+    SelectObject(mem_dc, dib);
+    if (!BitBlt(mem_dc, 0, 0, copy_w, copy_h, window_dc, 0, 0, SRCCOPY))
+        goto done;
+
+    memcpy(g_present_buf, bits, 640 * 480 * sizeof(DWORD));
+
+    DeleteObject(dib);
+    DeleteDC(mem_dc);
+    ReleaseDC(g_hwnd, window_dc);
+    return TRUE;
+
+done:
+    if (dib) DeleteObject(dib);
+    if (mem_dc) DeleteDC(mem_dc);
+    if (window_dc) ReleaseDC(g_hwnd, window_dc);
+    return FALSE;
+}
+
+static BOOL present_surface(void *iface, ProxyKind kind, const char *trigger)
+{
+    SurfaceSnapshot snap;
+    HRESULT hr;
+    DWORD caps;
+
+    hr = lock_surface_snapshot(iface, kind, &snap);
+    if (FAILED(hr)) {
+        log_present_event(trigger, "primary-lock-failed", NULL, 0, hr);
+        return FALSE;
     }
 
-    SelectObject(mem_dc, bmp);
-    s->hdc_mem = mem_dc;
-    s->hdc_bmp = bmp;
-    s->hdc_bits = bits;
-    *hdc = mem_dc;
-    rdd_log("Surf_GetDC: type=%d OK", s->type);
-    return DD_OK;
-}
-static HRESULT WINAPI Surf_GetFlipStatus(RDDSurface *s, DWORD f)
-    { (void)s; (void)f; return DD_OK; }
-static HRESULT WINAPI Surf_GetOverlayPosition(RDDSurface *s, LPLONG x, LPLONG y)
-    { (void)s; (void)x; (void)y; return DDERR_NOTAOVERLAYSURFACE; }
-static HRESULT WINAPI Surf_GetPalette(RDDSurface *s, void **p)
-    { (void)s; *p = NULL; return DDERR_NOPALETTEATTACHED; }
-static HRESULT WINAPI Surf_Initialize(RDDSurface *s, void *dd, LPDDSURFACEDESC2 d)
-    { (void)s; (void)dd; (void)d; return DDERR_ALREADYINITIALIZED; }
-static HRESULT WINAPI Surf_ReleaseDC(RDDSurface *s, HDC hdc) {
-    (void)hdc;
-    if (s->hdc_bits) {
-        /* Convert 32-bit DIB back to surface RGB565 */
-        DWORD y;
-        for (y = 0; y < s->height; y++) {
-            DWORD *src = (DWORD *)((BYTE *)s->hdc_bits + y * s->width * 4);
-            WORD *dst = (WORD *)(s->pixels + y * s->pitch);
-            DWORD x;
-            for (x = 0; x < s->width; x++) {
-                DWORD p = src[x];
-                dst[x] = (WORD)((((p >> 16) & 0xFF) >> 3) << 11 |
-                                (((p >> 8) & 0xFF) >> 2) << 5 |
-                                ((p & 0xFF) >> 3));
-            }
-        }
-    }
-    if (s->hdc_bmp) DeleteObject(s->hdc_bmp);
-    if (s->hdc_mem) DeleteDC(s->hdc_mem);
-    s->hdc_mem = NULL;
-    s->hdc_bmp = NULL;
-    s->hdc_bits = NULL;
-    return DD_OK;
-}
-static HRESULT WINAPI Surf_SetClipper(RDDSurface *s, void *c)
-    { rdd_log("Surf_SetClipper: type=%d clipper=%p", s->type, c); return DD_OK; }
-static HRESULT WINAPI Surf_SetColorKey(RDDSurface *s, DWORD f, LPDDCOLORKEY k) {
-    if ((f & DDCKEY_SRCBLT) && k) {
-        s->src_color_key = *k;
-        s->has_src_color_key = TRUE;
-        rdd_log("Surf_SetColorKey: SRCBLT low=0x%lx high=0x%lx type=%d",
-                k->dwColorSpaceLowValue, k->dwColorSpaceHighValue, s->type);
-    }
-    return DD_OK;
-}
-static HRESULT WINAPI Surf_SetOverlayPosition(RDDSurface *s, LONG x, LONG y)
-    { (void)s; (void)x; (void)y; return DDERR_NOTAOVERLAYSURFACE; }
-static HRESULT WINAPI Surf_SetPalette(RDDSurface *s, void *p)
-    { (void)s; (void)p; return DD_OK; }
-static HRESULT WINAPI Surf_UpdateOverlay(RDDSurface *s, LPRECT sr, RDDSurface *d, LPRECT dr, DWORD f, void *fx)
-    { (void)s; (void)sr; (void)d; (void)dr; (void)f; (void)fx; return DDERR_NOTAOVERLAYSURFACE; }
-static HRESULT WINAPI Surf_UpdateOverlayDisplay(RDDSurface *s, DWORD f)
-    { (void)s; (void)f; return DDERR_NOTAOVERLAYSURFACE; }
-static HRESULT WINAPI Surf_UpdateOverlayZOrder(RDDSurface *s, DWORD f, RDDSurface *r)
-    { (void)s; (void)f; (void)r; return DDERR_NOTAOVERLAYSURFACE; }
-static HRESULT WINAPI Surf_PageLock(RDDSurface *s, DWORD f)
-    { (void)s; (void)f; return DD_OK; }
-static HRESULT WINAPI Surf_PageUnlock(RDDSurface *s, DWORD f)
-    { (void)s; (void)f; return DD_OK; }
-static HRESULT WINAPI Surf_SetSurfaceDesc(RDDSurface *s, LPDDSURFACEDESC2 d, DWORD f)
-    { (void)s; (void)d; (void)f; return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI Surf_SetPrivateData(RDDSurface *s, REFGUID g, void *d, DWORD sz, DWORD f)
-    { (void)s; (void)g; (void)d; (void)sz; (void)f; return DD_OK; }
-static HRESULT WINAPI Surf_GetPrivateData(RDDSurface *s, REFGUID g, void *d, DWORD *sz)
-    { (void)s; (void)g; (void)d; (void)sz; return DDERR_NOTFOUND; }
-static HRESULT WINAPI Surf_FreePrivateData(RDDSurface *s, REFGUID g)
-    { (void)s; (void)g; return DD_OK; }
-static HRESULT WINAPI Surf_GetUniquenessValue(RDDSurface *s, DWORD *v)
-    { (void)s; *v = 0; return DD_OK; }
-static HRESULT WINAPI Surf_ChangeUniquenessValue(RDDSurface *s)
-    { (void)s; return DD_OK; }
-
-/* --- Real implementations --- */
-
-static HRESULT WINAPI Surf_IsLost(RDDSurface *self) {
-    (void)self;
-    return DD_OK;
-}
-
-static HRESULT WINAPI Surf_Restore(RDDSurface *self) {
-    (void)self;
-    return DD_OK;
-}
-
-static HRESULT WINAPI Surf_GetCaps(RDDSurface *self, LPDDSCAPS2 caps) {
-    memset(caps, 0, sizeof(DDSCAPS2));
-    caps->dwCaps = self->caps;
-    return DD_OK;
-}
-
-static HRESULT WINAPI Surf_GetPixelFormat(RDDSurface *self, LPDDPIXELFORMAT pf) {
-    *pf = self->pixfmt;
-    return DD_OK;
-}
-
-static HRESULT WINAPI Surf_GetSurfaceDesc(RDDSurface *self, LPDDSURFACEDESC2 desc) {
-    fill_surface_desc(self, desc);
-    return DD_OK;
-}
-
-static HRESULT WINAPI Surf_GetAttachedSurface(RDDSurface *self, LPDDSCAPS2 caps, RDDSurface **out) {
-    if (self->type == SURF_PRIMARY && self->back_buffer &&
-        (caps->dwCaps & DDSCAPS_BACKBUFFER)) {
-        self->back_buffer->refcount++;
-        *out = self->back_buffer;
-        rdd_log("GetAttachedSurface: returning back buffer");
-        return DD_OK;
-    }
-    *out = NULL;
-    rdd_log("GetAttachedSurface: not found (caps=0x%lx)", caps->dwCaps);
-    return DDERR_NOTFOUND;
-}
-
-static HRESULT WINAPI Surf_EnumAttachedSurfaces(RDDSurface *self, void *ctx, void *cb_raw) {
-    typedef HRESULT (WINAPI *EnumCB)(RDDSurface *, DDSURFACEDESC2 *, void *);
-    EnumCB cb = (EnumCB)cb_raw;
-
-    if (self->type == SURF_PRIMARY && self->back_buffer) {
-        DDSURFACEDESC2 desc;
-        fill_surface_desc(self->back_buffer, &desc);
-        cb(self->back_buffer, &desc, ctx);
-    }
-    return DD_OK;
-}
-
-static HRESULT WINAPI Surf_GetDDInterface(RDDSurface *self, void **dd) {
-    (void)self;
-    g_dd_refcount++;
-    *dd = &g_dd4;
-    return DD_OK;
-}
-
-static HRESULT WINAPI Surf_Lock(RDDSurface *self, LPRECT rect, LPDDSURFACEDESC2 desc, DWORD flags, HANDLE event) {
-    static int logged = 0;
-    (void)flags; (void)event;
-
-    if (logged < 5) {
-        rdd_log("Surf_Lock: %dx%d type=%d rect=%s", self->width, self->height, self->type,
-                rect ? "subrect" : "full");
-        logged++;
+    caps = get_surface_caps_value(iface, kind);
+    if (!snapshot_to_present_buffer(&snap)) {
+        log_present_event(trigger, "primary-unsupported", &snap, caps, DDERR_UNSUPPORTED);
+        unlock_surface_snapshot(&snap);
+        return FALSE;
     }
 
-    fill_surface_desc(self, desc);
-    desc->dwFlags |= DDSD_LPSURFACE;
+    log_present_event(trigger, "primary-lock", &snap, caps, DD_OK);
+    unlock_surface_snapshot(&snap);
+    present_buffer();
+    return TRUE;
+}
 
-    if (rect) {
-        desc->lpSurface = self->pixels + (rect->top * self->pitch) + (rect->left * (self->bpp / 8));
+static void maybe_present_primary(void *self, ProxyKind kind, const char *trigger)
+{
+    if (!g_hwnd || !surface_is_primary(self, kind)) return;
+
+    if (present_surface(self, kind, trigger)) return;
+
+    if (capture_window_client_to_present_buffer()) {
+        log_present_event(trigger, "window-dc", NULL, 0, DD_OK);
+        present_buffer();
     } else {
-        desc->lpSurface = self->pixels;
+        log_present_event(trigger, "window-dc-failed", NULL, 0, DDERR_GENERIC);
     }
-
-    self->locked = TRUE;
-    return DD_OK;
 }
 
-static HRESULT WINAPI Surf_Unlock(RDDSurface *self, LPRECT rect) {
-    (void)rect;
-    self->locked = FALSE;
-    return DD_OK;
-}
+/* ================================================================
+ * Proxy installation
+ * ================================================================ */
 
-static HRESULT WINAPI Surf_Flip(RDDSurface *self, RDDSurface *override, DWORD flags) {
-    static int logged = 0;
-    BYTE *tmp;
-    (void)override; (void)flags;
+static HRESULT WINAPI DD1_QueryInterface_Hook(LPDIRECTDRAW self, REFIID riid, void **out);
+static HRESULT WINAPI DD2_QueryInterface_Hook(LPDIRECTDRAW2 self, REFIID riid, void **out);
+static HRESULT WINAPI DD3_QueryInterface_Hook(LPDIRECTDRAW3 self, REFIID riid, void **out);
+static HRESULT WINAPI DD4_QueryInterface_Hook(LPDIRECTDRAW4 self, REFIID riid, void **out);
+static ULONG WINAPI DD1_Release_Hook(LPDIRECTDRAW self);
+static ULONG WINAPI DD2_Release_Hook(LPDIRECTDRAW2 self);
+static ULONG WINAPI DD3_Release_Hook(LPDIRECTDRAW3 self);
+static ULONG WINAPI DD4_Release_Hook(LPDIRECTDRAW4 self);
+static HRESULT WINAPI DD1_CreateSurface_Hook(LPDIRECTDRAW self, LPDDSURFACEDESC desc, LPDIRECTDRAWSURFACE *out, IUnknown *outer);
+static HRESULT WINAPI DD2_CreateSurface_Hook(LPDIRECTDRAW2 self, LPDDSURFACEDESC desc, LPDIRECTDRAWSURFACE *out, IUnknown *outer);
+static HRESULT WINAPI DD3_CreateSurface_Hook(LPDIRECTDRAW3 self, LPDDSURFACEDESC desc, LPDIRECTDRAWSURFACE *out, IUnknown *outer);
+static HRESULT WINAPI DD4_CreateSurface_Hook(LPDIRECTDRAW4 self, LPDDSURFACEDESC2 desc, LPDIRECTDRAWSURFACE4 *out, IUnknown *outer);
+static HRESULT WINAPI DD1_DuplicateSurface_Hook(LPDIRECTDRAW self, LPDIRECTDRAWSURFACE src, LPDIRECTDRAWSURFACE *out);
+static HRESULT WINAPI DD2_DuplicateSurface_Hook(LPDIRECTDRAW2 self, LPDIRECTDRAWSURFACE src, LPDIRECTDRAWSURFACE *out);
+static HRESULT WINAPI DD3_DuplicateSurface_Hook(LPDIRECTDRAW3 self, LPDIRECTDRAWSURFACE src, LPDIRECTDRAWSURFACE *out);
+static HRESULT WINAPI DD4_DuplicateSurface_Hook(LPDIRECTDRAW4 self, LPDIRECTDRAWSURFACE4 src, LPDIRECTDRAWSURFACE4 *out);
+static HRESULT WINAPI DD1_GetGDISurface_Hook(LPDIRECTDRAW self, LPDIRECTDRAWSURFACE *out);
+static HRESULT WINAPI DD2_GetGDISurface_Hook(LPDIRECTDRAW2 self, LPDIRECTDRAWSURFACE *out);
+static HRESULT WINAPI DD3_GetGDISurface_Hook(LPDIRECTDRAW3 self, LPDIRECTDRAWSURFACE *out);
+static HRESULT WINAPI DD4_GetGDISurface_Hook(LPDIRECTDRAW4 self, LPDIRECTDRAWSURFACE4 *out);
+static HRESULT WINAPI DD3_GetSurfaceFromDC_Hook(LPDIRECTDRAW3 self, HDC hdc, LPDIRECTDRAWSURFACE *out);
+static HRESULT WINAPI DD4_GetSurfaceFromDC_Hook(LPDIRECTDRAW4 self, HDC hdc, LPDIRECTDRAWSURFACE4 *out);
+static HRESULT WINAPI DD1_RestoreDisplayMode_Hook(LPDIRECTDRAW self);
+static HRESULT WINAPI DD2_RestoreDisplayMode_Hook(LPDIRECTDRAW2 self);
+static HRESULT WINAPI DD3_RestoreDisplayMode_Hook(LPDIRECTDRAW3 self);
+static HRESULT WINAPI DD4_RestoreDisplayMode_Hook(LPDIRECTDRAW4 self);
+static HRESULT WINAPI DD1_SetCooperativeLevel_Hook(LPDIRECTDRAW self, HWND hwnd, DWORD flags);
+static HRESULT WINAPI DD2_SetCooperativeLevel_Hook(LPDIRECTDRAW2 self, HWND hwnd, DWORD flags);
+static HRESULT WINAPI DD3_SetCooperativeLevel_Hook(LPDIRECTDRAW3 self, HWND hwnd, DWORD flags);
+static HRESULT WINAPI DD4_SetCooperativeLevel_Hook(LPDIRECTDRAW4 self, HWND hwnd, DWORD flags);
+static HRESULT WINAPI DD1_SetDisplayMode_Hook(LPDIRECTDRAW self, DWORD w, DWORD h, DWORD bpp);
+static HRESULT WINAPI DD2_SetDisplayMode_Hook(LPDIRECTDRAW2 self, DWORD w, DWORD h, DWORD bpp, DWORD refresh, DWORD flags);
+static HRESULT WINAPI DD3_SetDisplayMode_Hook(LPDIRECTDRAW3 self, DWORD w, DWORD h, DWORD bpp, DWORD refresh, DWORD flags);
+static HRESULT WINAPI DD4_SetDisplayMode_Hook(LPDIRECTDRAW4 self, DWORD w, DWORD h, DWORD bpp, DWORD refresh, DWORD flags);
 
-    if (self->type != SURF_PRIMARY || !self->back_buffer)
-        return DDERR_NOTFLIPPABLE;
+static HRESULT WINAPI Surf1_QueryInterface_Hook(LPDIRECTDRAWSURFACE self, REFIID riid, void **out);
+static HRESULT WINAPI Surf2_QueryInterface_Hook(LPDIRECTDRAWSURFACE2 self, REFIID riid, void **out);
+static HRESULT WINAPI Surf3_QueryInterface_Hook(LPDIRECTDRAWSURFACE3 self, REFIID riid, void **out);
+static HRESULT WINAPI Surf4_QueryInterface_Hook(LPDIRECTDRAWSURFACE4 self, REFIID riid, void **out);
+static ULONG WINAPI Surf1_Release_Hook(LPDIRECTDRAWSURFACE self);
+static ULONG WINAPI Surf2_Release_Hook(LPDIRECTDRAWSURFACE2 self);
+static ULONG WINAPI Surf3_Release_Hook(LPDIRECTDRAWSURFACE3 self);
+static ULONG WINAPI Surf4_Release_Hook(LPDIRECTDRAWSURFACE4 self);
+static HRESULT WINAPI Surf1_Blt_Hook(LPDIRECTDRAWSURFACE self, LPRECT dst, LPDIRECTDRAWSURFACE src, LPRECT src_rect, DWORD flags, LPDDBLTFX fx);
+static HRESULT WINAPI Surf2_Blt_Hook(LPDIRECTDRAWSURFACE2 self, LPRECT dst, LPDIRECTDRAWSURFACE2 src, LPRECT src_rect, DWORD flags, LPDDBLTFX fx);
+static HRESULT WINAPI Surf3_Blt_Hook(LPDIRECTDRAWSURFACE3 self, LPRECT dst, LPDIRECTDRAWSURFACE3 src, LPRECT src_rect, DWORD flags, LPDDBLTFX fx);
+static HRESULT WINAPI Surf4_Blt_Hook(LPDIRECTDRAWSURFACE4 self, LPRECT dst, LPDIRECTDRAWSURFACE4 src, LPRECT src_rect, DWORD flags, LPDDBLTFX fx);
+static HRESULT WINAPI Surf1_BltFast_Hook(LPDIRECTDRAWSURFACE self, DWORD x, DWORD y, LPDIRECTDRAWSURFACE src, LPRECT src_rect, DWORD trans);
+static HRESULT WINAPI Surf2_BltFast_Hook(LPDIRECTDRAWSURFACE2 self, DWORD x, DWORD y, LPDIRECTDRAWSURFACE2 src, LPRECT src_rect, DWORD trans);
+static HRESULT WINAPI Surf3_BltFast_Hook(LPDIRECTDRAWSURFACE3 self, DWORD x, DWORD y, LPDIRECTDRAWSURFACE3 src, LPRECT src_rect, DWORD trans);
+static HRESULT WINAPI Surf4_BltFast_Hook(LPDIRECTDRAWSURFACE4 self, DWORD x, DWORD y, LPDIRECTDRAWSURFACE4 src, LPRECT src_rect, DWORD trans);
+static HRESULT WINAPI Surf1_Flip_Hook(LPDIRECTDRAWSURFACE self, LPDIRECTDRAWSURFACE override, DWORD flags);
+static HRESULT WINAPI Surf2_Flip_Hook(LPDIRECTDRAWSURFACE2 self, LPDIRECTDRAWSURFACE2 override, DWORD flags);
+static HRESULT WINAPI Surf3_Flip_Hook(LPDIRECTDRAWSURFACE3 self, LPDIRECTDRAWSURFACE3 override, DWORD flags);
+static HRESULT WINAPI Surf4_Flip_Hook(LPDIRECTDRAWSURFACE4 self, LPDIRECTDRAWSURFACE4 override, DWORD flags);
+static HRESULT WINAPI Surf1_GetAttachedSurface_Hook(LPDIRECTDRAWSURFACE self, LPDDSCAPS caps, LPDIRECTDRAWSURFACE *out);
+static HRESULT WINAPI Surf2_GetAttachedSurface_Hook(LPDIRECTDRAWSURFACE2 self, LPDDSCAPS caps, LPDIRECTDRAWSURFACE2 *out);
+static HRESULT WINAPI Surf3_GetAttachedSurface_Hook(LPDIRECTDRAWSURFACE3 self, LPDDSCAPS caps, LPDIRECTDRAWSURFACE3 *out);
+static HRESULT WINAPI Surf4_GetAttachedSurface_Hook(LPDIRECTDRAWSURFACE4 self, LPDDSCAPS2 caps, LPDIRECTDRAWSURFACE4 *out);
 
-    /* Swap pixel buffers */
-    tmp = self->pixels;
-    self->pixels = self->back_buffer->pixels;
-    self->back_buffer->pixels = tmp;
+static ProxyEntry *install_proxy(void *iface, ProxyKind kind)
+{
+    ProxyEntry *entry;
+    size_t count;
 
-    /* Present the new front buffer */
-    present_frame(self);
+    if (!iface || !g_proxy_lock_ready) return NULL;
 
-    if (logged < 5) {
-        rdd_log("Surf_Flip: presented %dx%d", self->width, self->height);
-        logged++;
-    }
-    return DD_OK;
-}
-
-static HRESULT WINAPI Surf_Blt(RDDSurface *self, LPRECT dst_rect,
-                                RDDSurface *src, LPRECT src_rect,
-                                DWORD flags, LPDDBLTFX fx) {
-    static int logged = 0;
-
-    /* Color fill */
-    if (flags & DDBLT_COLORFILL) {
-        WORD fill16 = (WORD)(fx->dwFillColor & 0xFFFF);
-        RECT dr;
-        int y, x;
-        if (dst_rect) {
-            dr = *dst_rect;
-        } else {
-            dr.left = 0; dr.top = 0;
-            dr.right = (LONG)self->width; dr.bottom = (LONG)self->height;
+    EnterCriticalSection(&g_proxy_lock);
+    entry = find_proxy_locked(iface);
+    if (entry) {
+        if (entry->kind != kind) {
+            rdd_log("install_proxy: existing kind mismatch %s != %s",
+                    proxy_kind_name(entry->kind), proxy_kind_name(kind));
         }
-        for (y = dr.top; y < dr.bottom; y++) {
-            WORD *row = (WORD *)(self->pixels + y * self->pitch);
-            for (x = dr.left; x < dr.right; x++)
-                row[x] = fill16;
+        LeaveCriticalSection(&g_proxy_lock);
+        return entry;
+    }
+
+    count = proxy_vtbl_count(kind);
+    if (!count) {
+        LeaveCriticalSection(&g_proxy_lock);
+        return NULL;
+    }
+
+    entry = (ProxyEntry *)calloc(1, sizeof(*entry));
+    if (!entry) {
+        LeaveCriticalSection(&g_proxy_lock);
+        return NULL;
+    }
+
+    entry->proxy_vtbl = (void **)calloc(count, sizeof(void *));
+    if (!entry->proxy_vtbl) {
+        free(entry);
+        LeaveCriticalSection(&g_proxy_lock);
+        return NULL;
+    }
+
+    entry->iface = iface;
+    entry->kind = kind;
+    entry->orig_vtbl = ((GenericIface *)iface)->lpVtbl;
+    memcpy(entry->proxy_vtbl, entry->orig_vtbl, count * sizeof(void *));
+
+    switch (kind) {
+    case PROXY_DD1:
+        entry->proxy_vtbl[0] = DD1_QueryInterface_Hook;
+        entry->proxy_vtbl[2] = DD1_Release_Hook;
+        entry->proxy_vtbl[6] = DD1_CreateSurface_Hook;
+        entry->proxy_vtbl[7] = DD1_DuplicateSurface_Hook;
+        entry->proxy_vtbl[14] = DD1_GetGDISurface_Hook;
+        entry->proxy_vtbl[19] = DD1_RestoreDisplayMode_Hook;
+        entry->proxy_vtbl[20] = DD1_SetCooperativeLevel_Hook;
+        entry->proxy_vtbl[21] = DD1_SetDisplayMode_Hook;
+        break;
+    case PROXY_DD2:
+        entry->proxy_vtbl[0] = DD2_QueryInterface_Hook;
+        entry->proxy_vtbl[2] = DD2_Release_Hook;
+        entry->proxy_vtbl[6] = DD2_CreateSurface_Hook;
+        entry->proxy_vtbl[7] = DD2_DuplicateSurface_Hook;
+        entry->proxy_vtbl[14] = DD2_GetGDISurface_Hook;
+        entry->proxy_vtbl[19] = DD2_RestoreDisplayMode_Hook;
+        entry->proxy_vtbl[20] = DD2_SetCooperativeLevel_Hook;
+        entry->proxy_vtbl[21] = DD2_SetDisplayMode_Hook;
+        break;
+    case PROXY_DD3:
+        entry->proxy_vtbl[0] = DD3_QueryInterface_Hook;
+        entry->proxy_vtbl[2] = DD3_Release_Hook;
+        entry->proxy_vtbl[6] = DD3_CreateSurface_Hook;
+        entry->proxy_vtbl[7] = DD3_DuplicateSurface_Hook;
+        entry->proxy_vtbl[14] = DD3_GetGDISurface_Hook;
+        entry->proxy_vtbl[19] = DD3_RestoreDisplayMode_Hook;
+        entry->proxy_vtbl[20] = DD3_SetCooperativeLevel_Hook;
+        entry->proxy_vtbl[21] = DD3_SetDisplayMode_Hook;
+        entry->proxy_vtbl[24] = DD3_GetSurfaceFromDC_Hook;
+        break;
+    case PROXY_DD4:
+        entry->proxy_vtbl[0] = DD4_QueryInterface_Hook;
+        entry->proxy_vtbl[2] = DD4_Release_Hook;
+        entry->proxy_vtbl[6] = DD4_CreateSurface_Hook;
+        entry->proxy_vtbl[7] = DD4_DuplicateSurface_Hook;
+        entry->proxy_vtbl[14] = DD4_GetGDISurface_Hook;
+        entry->proxy_vtbl[19] = DD4_RestoreDisplayMode_Hook;
+        entry->proxy_vtbl[20] = DD4_SetCooperativeLevel_Hook;
+        entry->proxy_vtbl[21] = DD4_SetDisplayMode_Hook;
+        entry->proxy_vtbl[24] = DD4_GetSurfaceFromDC_Hook;
+        break;
+    case PROXY_SURF1:
+        entry->proxy_vtbl[0] = Surf1_QueryInterface_Hook;
+        entry->proxy_vtbl[2] = Surf1_Release_Hook;
+        entry->proxy_vtbl[5] = Surf1_Blt_Hook;
+        entry->proxy_vtbl[7] = Surf1_BltFast_Hook;
+        entry->proxy_vtbl[11] = Surf1_Flip_Hook;
+        entry->proxy_vtbl[12] = Surf1_GetAttachedSurface_Hook;
+        break;
+    case PROXY_SURF2:
+        entry->proxy_vtbl[0] = Surf2_QueryInterface_Hook;
+        entry->proxy_vtbl[2] = Surf2_Release_Hook;
+        entry->proxy_vtbl[5] = Surf2_Blt_Hook;
+        entry->proxy_vtbl[7] = Surf2_BltFast_Hook;
+        entry->proxy_vtbl[11] = Surf2_Flip_Hook;
+        entry->proxy_vtbl[12] = Surf2_GetAttachedSurface_Hook;
+        break;
+    case PROXY_SURF3:
+        entry->proxy_vtbl[0] = Surf3_QueryInterface_Hook;
+        entry->proxy_vtbl[2] = Surf3_Release_Hook;
+        entry->proxy_vtbl[5] = Surf3_Blt_Hook;
+        entry->proxy_vtbl[7] = Surf3_BltFast_Hook;
+        entry->proxy_vtbl[11] = Surf3_Flip_Hook;
+        entry->proxy_vtbl[12] = Surf3_GetAttachedSurface_Hook;
+        break;
+    case PROXY_SURF4:
+        entry->proxy_vtbl[0] = Surf4_QueryInterface_Hook;
+        entry->proxy_vtbl[2] = Surf4_Release_Hook;
+        entry->proxy_vtbl[5] = Surf4_Blt_Hook;
+        entry->proxy_vtbl[7] = Surf4_BltFast_Hook;
+        entry->proxy_vtbl[11] = Surf4_Flip_Hook;
+        entry->proxy_vtbl[12] = Surf4_GetAttachedSurface_Hook;
+        break;
+    }
+
+    ((GenericIface *)iface)->lpVtbl = entry->proxy_vtbl;
+    entry->next = g_proxy_list;
+    g_proxy_list = entry;
+    LeaveCriticalSection(&g_proxy_lock);
+
+    if (!is_surface_kind(kind) || g_surface_proxy_install_logs < 24) {
+        if (is_surface_kind(kind)) ++g_surface_proxy_install_logs;
+        rdd_log("install_proxy: %s iface=%p", proxy_kind_name(kind), iface);
+    }
+    return entry;
+}
+
+static void wrap_query_result(REFIID riid, void **out)
+{
+    ProxyKind kind;
+    if (!out || !*out) return;
+    if (dd_kind_from_iid(riid, &kind) || surface_kind_from_iid(riid, &kind))
+        install_proxy(*out, kind);
+}
+
+static HRESULT proxy_query_interface_common(void *self, REFIID riid, void **out)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, REFIID, void **);
+
+    if (!entry) return E_NOINTERFACE;
+    orig = (HRESULT (WINAPI *)(void *, REFIID, void **))entry->orig_vtbl[0];
+    hr = orig(self, riid, out);
+    if (SUCCEEDED(hr)) wrap_query_result(riid, out);
+    return hr;
+}
+
+static ULONG proxy_release_common(void *self)
+{
+    ProxyEntry *entry = find_proxy(self);
+    ULONG ref;
+    ULONG (WINAPI *orig)(void *);
+
+    if (!entry) return 0;
+    orig = (ULONG (WINAPI *)(void *))entry->orig_vtbl[2];
+    ref = orig(self);
+    if (ref == 0) {
+        if (!is_surface_kind(entry->kind) || g_surface_proxy_release_logs < 24) {
+            if (is_surface_kind(entry->kind)) ++g_surface_proxy_release_logs;
+            rdd_log("release proxy: %s iface=%p", proxy_kind_name(entry->kind), self);
         }
-        { rdd_log("Surf_Blt: colorfill 0x%04x type=%d", fill16, self->type); }
-        if (self->type == SURF_PRIMARY)
-            present_frame(self);
-        return DD_OK;
+        remove_proxy(self);
     }
-
-    /* Surface-to-surface copy */
-    if (src) {
-        RECT sr, dr;
-        int src_w, src_h, dst_w, dst_h, y;
-        int bytes_per_pixel = (int)(self->bpp / 8);
-        BOOL use_colorkey = FALSE;
-        DWORD ck_low = 0;
-
-        /* Determine if source color key transparency is needed */
-        if ((flags & DDBLT_KEYSRCOVERRIDE) && fx) {
-            use_colorkey = TRUE;
-            ck_low = fx->ddckSrcColorkey.dwColorSpaceLowValue;
-        } else if ((flags & DDBLT_KEYSRC) && src->has_src_color_key) {
-            use_colorkey = TRUE;
-            ck_low = src->src_color_key.dwColorSpaceLowValue;
-        }
-
-        sr.left = 0; sr.top = 0;
-        sr.right = (LONG)src->width; sr.bottom = (LONG)src->height;
-        if (src_rect) sr = *src_rect;
-
-        dr.left = 0; dr.top = 0;
-        dr.right = (LONG)self->width; dr.bottom = (LONG)self->height;
-        if (dst_rect) dr = *dst_rect;
-
-        src_w = sr.right - sr.left;
-        src_h = sr.bottom - sr.top;
-        dst_w = dr.right - dr.left;
-        dst_h = dr.bottom - dr.top;
-
-        /* Simple copy (no stretch): use minimum dimensions */
-        if (src_w > dst_w) src_w = dst_w;
-        if (src_h > dst_h) src_h = dst_h;
-
-        if (use_colorkey && bytes_per_pixel == 2) {
-            WORD ck16 = (WORD)(ck_low & 0xFFFF);
-            for (y = 0; y < src_h; y++) {
-                WORD *d = (WORD *)(self->pixels + (dr.top + y) * self->pitch + dr.left * 2);
-                WORD *s = (WORD *)(src->pixels + (sr.top + y) * src->pitch + sr.left * 2);
-                int x;
-                for (x = 0; x < src_w; x++) {
-                    if (s[x] != ck16)
-                        d[x] = s[x];
-                }
-            }
-        } else {
-            for (y = 0; y < src_h; y++) {
-                BYTE *dst_row = self->pixels + (dr.top + y) * self->pitch + dr.left * bytes_per_pixel;
-                BYTE *src_row = src->pixels + (sr.top + y) * src->pitch + sr.left * bytes_per_pixel;
-                memcpy(dst_row, src_row, (size_t)(src_w * bytes_per_pixel));
-            }
-        }
-        { rdd_log("Surf_Blt: copy %dx%d to type=%d colorkey=%d", src_w, src_h, self->type, use_colorkey); }
-
-        /* Present if we just blitted to the primary surface */
-        if (self->type == SURF_PRIMARY)
-            present_frame(self);
-
-        return DD_OK;
-    }
-
-    rdd_log("Surf_Blt: unhandled flags=0x%lx", flags);
-    return DD_OK;
-}
-
-static HRESULT WINAPI Surf_BltFast(RDDSurface *self, DWORD dx, DWORD dy,
-                                    RDDSurface *src, LPRECT src_rect, DWORD flags) {
-    RECT sr;
-    int w, h, y;
-    int bytes_per_pixel;
-
-    if (!src) return DDERR_INVALIDPARAMS;
-
-    bytes_per_pixel = (int)(self->bpp / 8);
-
-    sr.left = 0; sr.top = 0;
-    sr.right = (LONG)src->width; sr.bottom = (LONG)src->height;
-    if (src_rect) sr = *src_rect;
-
-    w = sr.right - sr.left;
-    h = sr.bottom - sr.top;
-
-    /* Clip to destination */
-    if ((int)dx + w > (int)self->width)  w = (int)self->width - (int)dx;
-    if ((int)dy + h > (int)self->height) h = (int)self->height - (int)dy;
-    if (w <= 0 || h <= 0) return DD_OK;
-
-    if ((flags & DDBLTFAST_SRCCOLORKEY) && src->has_src_color_key && bytes_per_pixel == 2) {
-        WORD ck16 = (WORD)(src->src_color_key.dwColorSpaceLowValue & 0xFFFF);
-        for (y = 0; y < h; y++) {
-            WORD *d = (WORD *)(self->pixels + ((int)dy + y) * self->pitch + (int)dx * 2);
-            WORD *s = (WORD *)(src->pixels + (sr.top + y) * src->pitch + sr.left * 2);
-            int x;
-            for (x = 0; x < w; x++) {
-                if (s[x] != ck16)
-                    d[x] = s[x];
-            }
-        }
-    } else {
-        for (y = 0; y < h; y++) {
-            BYTE *dst_row = self->pixels + ((int)dy + y) * self->pitch + (int)dx * bytes_per_pixel;
-            BYTE *src_row = src->pixels + (sr.top + y) * src->pitch + sr.left * bytes_per_pixel;
-            memcpy(dst_row, src_row, (size_t)(w * bytes_per_pixel));
-        }
-    }
-
-    /* Present if we just blitted to the primary surface */
-    if (self->type == SURF_PRIMARY)
-        present_frame(self);
-
-    return DD_OK;
-}
-
-/* ================================================================
- * Surface vtable definition
- * ================================================================ */
-
-struct RDDSurfaceVtbl {
-    HRESULT (WINAPI *QueryInterface)(RDDSurface*, REFIID, void**);
-    ULONG   (WINAPI *AddRef)(RDDSurface*);
-    ULONG   (WINAPI *Release)(RDDSurface*);
-    HRESULT (WINAPI *AddAttachedSurface)(RDDSurface*, RDDSurface*);
-    HRESULT (WINAPI *AddOverlayDirtyRect)(RDDSurface*, LPRECT);
-    HRESULT (WINAPI *Blt)(RDDSurface*, LPRECT, RDDSurface*, LPRECT, DWORD, LPDDBLTFX);
-    HRESULT (WINAPI *BltBatch)(RDDSurface*, void*, DWORD, DWORD);
-    HRESULT (WINAPI *BltFast)(RDDSurface*, DWORD, DWORD, RDDSurface*, LPRECT, DWORD);
-    HRESULT (WINAPI *DeleteAttachedSurface)(RDDSurface*, DWORD, RDDSurface*);
-    HRESULT (WINAPI *EnumAttachedSurfaces)(RDDSurface*, void*, void*);
-    HRESULT (WINAPI *EnumOverlayZOrders)(RDDSurface*, DWORD, void*, void*);
-    HRESULT (WINAPI *Flip)(RDDSurface*, RDDSurface*, DWORD);
-    HRESULT (WINAPI *GetAttachedSurface)(RDDSurface*, LPDDSCAPS2, RDDSurface**);
-    HRESULT (WINAPI *GetBltStatus)(RDDSurface*, DWORD);
-    HRESULT (WINAPI *GetCaps)(RDDSurface*, LPDDSCAPS2);
-    HRESULT (WINAPI *GetClipper)(RDDSurface*, void**);
-    HRESULT (WINAPI *GetColorKey)(RDDSurface*, DWORD, LPDDCOLORKEY);
-    HRESULT (WINAPI *GetDC)(RDDSurface*, HDC*);
-    HRESULT (WINAPI *GetFlipStatus)(RDDSurface*, DWORD);
-    HRESULT (WINAPI *GetOverlayPosition)(RDDSurface*, LPLONG, LPLONG);
-    HRESULT (WINAPI *GetPalette)(RDDSurface*, void**);
-    HRESULT (WINAPI *GetPixelFormat)(RDDSurface*, LPDDPIXELFORMAT);
-    HRESULT (WINAPI *GetSurfaceDesc)(RDDSurface*, LPDDSURFACEDESC2);
-    HRESULT (WINAPI *Initialize)(RDDSurface*, void*, LPDDSURFACEDESC2);
-    HRESULT (WINAPI *IsLost)(RDDSurface*);
-    HRESULT (WINAPI *Lock)(RDDSurface*, LPRECT, LPDDSURFACEDESC2, DWORD, HANDLE);
-    HRESULT (WINAPI *ReleaseDC)(RDDSurface*, HDC);
-    HRESULT (WINAPI *Restore)(RDDSurface*);
-    HRESULT (WINAPI *SetClipper)(RDDSurface*, void*);
-    HRESULT (WINAPI *SetColorKey)(RDDSurface*, DWORD, LPDDCOLORKEY);
-    HRESULT (WINAPI *SetOverlayPosition)(RDDSurface*, LONG, LONG);
-    HRESULT (WINAPI *SetPalette)(RDDSurface*, void*);
-    HRESULT (WINAPI *Unlock)(RDDSurface*, LPRECT);
-    HRESULT (WINAPI *UpdateOverlay)(RDDSurface*, LPRECT, RDDSurface*, LPRECT, DWORD, void*);
-    HRESULT (WINAPI *UpdateOverlayDisplay)(RDDSurface*, DWORD);
-    HRESULT (WINAPI *UpdateOverlayZOrder)(RDDSurface*, DWORD, RDDSurface*);
-    HRESULT (WINAPI *GetDDInterface)(RDDSurface*, void**);
-    HRESULT (WINAPI *PageLock)(RDDSurface*, DWORD);
-    HRESULT (WINAPI *PageUnlock)(RDDSurface*, DWORD);
-    HRESULT (WINAPI *SetSurfaceDesc)(RDDSurface*, LPDDSURFACEDESC2, DWORD);
-    HRESULT (WINAPI *SetPrivateData)(RDDSurface*, REFGUID, void*, DWORD, DWORD);
-    HRESULT (WINAPI *GetPrivateData)(RDDSurface*, REFGUID, void*, DWORD*);
-    HRESULT (WINAPI *FreePrivateData)(RDDSurface*, REFGUID);
-    HRESULT (WINAPI *GetUniquenessValue)(RDDSurface*, DWORD*);
-    HRESULT (WINAPI *ChangeUniquenessValue)(RDDSurface*);
-};
-
-static RDDSurfaceVtbl g_surf_vtbl = {
-    Surf_QueryInterface,
-    Surf_AddRef,
-    Surf_Release,
-    Surf_AddAttachedSurface,        /* 3 */
-    Surf_AddOverlayDirtyRect,       /* 4 */
-    Surf_Blt,                       /* 5 */
-    Surf_BltBatch,                  /* 6 */
-    Surf_BltFast,                   /* 7 */
-    Surf_DeleteAttachedSurface,     /* 8 */
-    Surf_EnumAttachedSurfaces,      /* 9 */
-    Surf_EnumOverlayZOrders,        /* 10 */
-    Surf_Flip,                      /* 11 */
-    Surf_GetAttachedSurface,        /* 12 */
-    Surf_GetBltStatus,              /* 13 */
-    Surf_GetCaps,                   /* 14 */
-    Surf_GetClipper,                /* 15 */
-    Surf_GetColorKey,               /* 16 */
-    Surf_GetDC,                     /* 17 */
-    Surf_GetFlipStatus,             /* 18 */
-    Surf_GetOverlayPosition,        /* 19 */
-    Surf_GetPalette,                /* 20 */
-    Surf_GetPixelFormat,            /* 21 */
-    Surf_GetSurfaceDesc,            /* 22 */
-    Surf_Initialize,                /* 23 */
-    Surf_IsLost,                    /* 24 */
-    Surf_Lock,                      /* 25 */
-    Surf_ReleaseDC,                 /* 26 */
-    Surf_Restore,                   /* 27 */
-    Surf_SetClipper,                /* 28 */
-    Surf_SetColorKey,               /* 29 */
-    Surf_SetOverlayPosition,        /* 30 */
-    Surf_SetPalette,                /* 31 */
-    Surf_Unlock,                    /* 32 */
-    Surf_UpdateOverlay,             /* 33 */
-    Surf_UpdateOverlayDisplay,      /* 34 */
-    Surf_UpdateOverlayZOrder,       /* 35 */
-    Surf_GetDDInterface,            /* 36 */
-    Surf_PageLock,                  /* 37 */
-    Surf_PageUnlock,                /* 38 */
-    Surf_SetSurfaceDesc,            /* 39 */
-    Surf_SetPrivateData,            /* 40 */
-    Surf_GetPrivateData,            /* 41 */
-    Surf_FreePrivateData,           /* 42 */
-    Surf_GetUniquenessValue,        /* 43 */
-    Surf_ChangeUniquenessValue      /* 44 */
-};
-
-/* ================================================================
- * IDirectDraw4 methods (28 total)
- * ================================================================ */
-
-/* ================================================================
- * Minimal IDirect3D3 stub (just enough for DirectX 6 version check)
- * ================================================================ */
-
-typedef struct D3DObj D3DObj;
-typedef struct D3DVtbl D3DVtbl;
-struct D3DObj { D3DVtbl *lpVtbl; };
-
-static HRESULT WINAPI D3D_QueryInterface(D3DObj *self, REFIID riid, void **out);
-static ULONG WINAPI D3D_AddRef(D3DObj *self) { (void)self; return ++g_dd_refcount; }
-static ULONG WINAPI D3D_Release(D3DObj *self) { (void)self; if (g_dd_refcount > 0) g_dd_refcount--; return g_dd_refcount; }
-
-/* IDirect3D3 has 10 methods. Most are stubs. */
-/* ================================================================
- * Minimal IDirect3DDevice3 stub (42 methods)
- * The game creates this but does its own software rendering via
- * locked DirectDraw surfaces, so all methods are no-ops.
- * ================================================================ */
-
-typedef struct D3DDevObj D3DDevObj;
-struct D3DDevObj { void **lpVtbl; };
-
-/* D3D render state storage - the game uses Set/Get pairs as a key-value store
- * for its software renderer. Without storage, GetRenderState returns 0 for
- * everything, causing lighting to reset to black on save game load. */
-#define D3DDEV_MAX_RENDERSTATE 256
-static DWORD g_render_states[D3DDEV_MAX_RENDERSTATE];
-
-#define D3DDEV_MAX_LIGHTSTATE 16
-static DWORD g_light_states[D3DDEV_MAX_LIGHTSTATE];
-
-#define D3DDEV_MAX_TEXSTAGES 8
-#define D3DDEV_MAX_TEXSTATE 64
-static DWORD g_texstage_states[D3DDEV_MAX_TEXSTAGES][D3DDEV_MAX_TEXSTATE];
-
-/* Forward declarations for D3D objects used by device stubs */
-static D3DObj g_d3d;
-typedef struct D3DVPObj D3DVPObj;
-struct D3DVPObj { void **lpVtbl; };
-static D3DVPObj g_d3dvp;
-
-/* Generic stubs by parameter count (stdcall, all params are 4 bytes on x86) */
-static HRESULT WINAPI d3dd_stub1(void *s) { (void)s; return DD_OK; }
-static HRESULT WINAPI d3dd_stub2(void *s, void *a) { (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI d3dd_stub3(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI d3dd_stub4(void *s, void *a, void *b, void *c) { (void)s; (void)a; (void)b; (void)c; return DD_OK; }
-static HRESULT WINAPI d3dd_stub5(void *s, void *a, void *b, void *c, void *d) { (void)s; (void)a; (void)b; (void)c; (void)d; return DD_OK; }
-static HRESULT WINAPI d3dd_stub6(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
-static HRESULT WINAPI d3dd_stub7(void *s, void *a, void *b, void *c, void *d, void *e, void *f) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return DD_OK; }
-static HRESULT WINAPI d3dd_stub8(void *s, void *a, void *b, void *c, void *d, void *e, void *f, void *g) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return DD_OK; }
-
-static HRESULT WINAPI D3DDev_QueryInterface(D3DDevObj *self, REFIID riid, void **out) {
-    if (guid_eq(riid, &MY_IID_IDirect3DDevice3) || guid_eq(riid, &MY_IID_IUnknown)) {
-        *out = self; rdd_log("D3DDev_QI: returning self"); return S_OK;
-    }
-    *out = NULL;
-    rdd_log("D3DDev_QI: E_NOINTERFACE {%08lx-...}", riid->Data1);
-    return E_NOINTERFACE;
-}
-static ULONG WINAPI D3DDev_AddRef(D3DDevObj *self) { (void)self; return 2; }
-static ULONG WINAPI D3DDev_Release(D3DDevObj *self) { (void)self; return 1; }
-
-/* Fill a D3DDEVICEDESC (252 bytes / 63 DWORDs) with software renderer caps.
- * Layout:
- *   d[0]=dwSize  d[1]=dwFlags  d[2]=dcmColorModel  d[3]=dwDevCaps
- *   d[4..5]=dtcTransformCaps  d[6]=bClipping  d[7..10]=dlcLightingCaps
- *   d[11..24]=dpcLineCaps (D3DPRIMCAPS, 14 DWORDs)
- *   d[25..38]=dpcTriCaps  d[39]=dwDeviceRenderBitDepth  d[40]=dwDeviceZBufferBitDepth
- *   d[41]=dwMaxBufferSize  d[42]=dwMaxVertexCount
- *   d[43..44]=minTex WxH  d[45..46]=maxTex WxH  d[47..50]=stipple min/max
- *   d[51]=maxTexRepeat  d[52]=maxTexAspect  d[53]=maxAniso
- *   d[54..58]=guard band + extentsAdjust (floats)
- *   d[59]=stencilCaps  d[60]=fvfCaps  d[61]=texOpCaps
- *   d[62]=wMaxTexBlendStages(lo) | wMaxSimTextures(hi)
- */
-static void fill_d3d_device_desc(void *desc) {
-    DWORD *d = (DWORD *)desc;
-    memset(d, 0, 252);
-
-    d[0]  = 252;       /* dwSize */
-    d[1]  = 0x7FF;     /* dwFlags: all capability fields valid */
-    d[2]  = 1;         /* dcmColorModel: D3DCOLOR_RGB */
-    d[3]  = 0x00000110 /* TEXTURESYSTEMMEMORY(0x100) | EXECUTESYSTEMMEMORY(0x10) */
-          | 0x00000440;/* DRAWPRIMTLVERTEX(0x400) | TLVERTEXSYSTEMMEMORY(0x40) */
-    d[4]  = 8;         /* dtcTransformCaps.dwSize */
-    d[5]  = 1;         /* dtcTransformCaps.dwCaps: D3DTRANSFORMCAPS_CLIP */
-    d[6]  = 1;         /* bClipping = TRUE */
-    d[7]  = 16;        /* dlcLightingCaps.dwSize */
-    d[8]  = 0x1F;      /* dlcLightingCaps.dwCaps: all light types */
-    d[9]  = 1;         /* dlcLightingCaps.dwLightingModel: RGB */
-    d[10] = 8;         /* dlcLightingCaps.dwNumLights */
-
-    /* dpcLineCaps (d[11..24]) and dpcTriCaps (d[25..38]) - D3DPRIMCAPS, 14 DWORDs each */
-    /* Fill both identically */
-    {
-        int base;
-        for (base = 11; base <= 25; base += 14) {
-            d[base+0]  = 56;       /* dwSize */
-            d[base+1]  = 0x70;     /* dwMiscCaps: CULLNONE|CULLCW|CULLCCW */
-            d[base+2]  = 0x21;     /* dwRasterCaps: DITHER | SUBPIXEL */
-            d[base+3]  = 0xFF;     /* dwZCmpCaps: all compare functions */
-            d[base+4]  = 0x1FFF;   /* dwSrcBlendCaps */
-            d[base+5]  = 0x1FFF;   /* dwDestBlendCaps */
-            d[base+6]  = 0xFF;     /* dwAlphaCmpCaps */
-            d[base+7]  = 0x03FCFC; /* dwShadeCaps: gouraud + flat + specular */
-            d[base+8]  = 0x0D;     /* dwTextureCaps: PERSPECTIVE|ALPHA|TRANSPARENCY */
-            d[base+9]  = 0x0703;   /* dwTextureFilterCaps: nearest + linear + mip */
-            d[base+10] = 0x07;     /* dwTextureBlendCaps: decal + modulate + add */
-            d[base+11] = 0x03;     /* dwTextureAddressCaps: wrap + mirror */
-        }
-    }
-
-    d[39] = 0x0400;    /* dwDeviceRenderBitDepth: DDBD_16 */
-    d[40] = 0x0400;    /* dwDeviceZBufferBitDepth: DDBD_16 */
-    d[42] = 65536;     /* dwMaxVertexCount */
-    d[43] = 1;         /* dwMinTextureWidth */
-    d[44] = 1;         /* dwMinTextureHeight */
-    d[45] = 1024;      /* dwMaxTextureWidth */
-    d[46] = 1024;      /* dwMaxTextureHeight */
-    d[51] = 1024;      /* dwMaxTextureRepeat */
-    d[52] = 1024;      /* dwMaxTextureAspectRatio */
-    d[53] = 1;         /* dwMaxAnisotropy */
-}
-
-/* Individual device stubs with logging */
-static HRESULT WINAPI D3DDev_GetCaps(void *s, void *hal, void *hel) {
-    rdd_log("D3DDev[3] GetCaps");
-    (void)s;
-    if (hal) fill_d3d_device_desc(hal);
-    if (hel) fill_d3d_device_desc(hel);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_GetStats(void *s, void *a) { (void)s; if (a) memset(a, 0, 36); return DD_OK; }
-static HRESULT WINAPI D3DDev_AddViewport(void *s, void *a) { rdd_log("D3DDev[5] AddViewport"); (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI D3DDev_DeleteViewport(void *s, void *a) { rdd_log("D3DDev[6] DeleteViewport"); (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI D3DDev_NextViewport(void *s, void *a, void *b, void *c) { rdd_log("D3DDev[7] NextViewport"); (void)s; (void)a; (void)b; (void)c; return DD_OK; }
-static HRESULT WINAPI D3DDev_EnumTextureFormats(void *s, void *cb_raw, void *ctx) {
-    typedef HRESULT (WINAPI *TexFmtCB)(DDPIXELFORMAT *, void *);
-    TexFmtCB cb = (TexFmtCB)cb_raw;
-    DDPIXELFORMAT pf;
-    (void)s;
-    rdd_log("D3DDev[8] EnumTextureFormats: calling callback");
-
-    /* RGB565 (16-bit) */
-    memset(&pf, 0, sizeof(pf));
-    pf.dwSize = sizeof(DDPIXELFORMAT);
-    pf.dwFlags = DDPF_RGB;
-    pf.dwRGBBitCount = 16;
-    pf.dwRBitMask = 0xF800;
-    pf.dwGBitMask = 0x07E0;
-    pf.dwBBitMask = 0x001F;
-    if (cb(&pf, ctx) == 0) return DD_OK; /* callback returned DDENUMRET_CANCEL */
-
-    /* ARGB1555 (16-bit with alpha) */
-    memset(&pf, 0, sizeof(pf));
-    pf.dwSize = sizeof(DDPIXELFORMAT);
-    pf.dwFlags = DDPF_RGB | DDPF_ALPHAPIXELS;
-    pf.dwRGBBitCount = 16;
-    pf.dwRGBAlphaBitMask = 0x8000;
-    pf.dwRBitMask = 0x7C00;
-    pf.dwGBitMask = 0x03E0;
-    pf.dwBBitMask = 0x001F;
-    if (cb(&pf, ctx) == 0) return DD_OK;
-
-    /* RGB555 (16-bit, no alpha) */
-    memset(&pf, 0, sizeof(pf));
-    pf.dwSize = sizeof(DDPIXELFORMAT);
-    pf.dwFlags = DDPF_RGB;
-    pf.dwRGBBitCount = 16;
-    pf.dwRBitMask = 0x7C00;
-    pf.dwGBitMask = 0x03E0;
-    pf.dwBBitMask = 0x001F;
-    if (cb(&pf, ctx) == 0) return DD_OK;
-
-    /* ARGB4444 (16-bit, 4-bit alpha) */
-    memset(&pf, 0, sizeof(pf));
-    pf.dwSize = sizeof(DDPIXELFORMAT);
-    pf.dwFlags = DDPF_RGB | DDPF_ALPHAPIXELS;
-    pf.dwRGBBitCount = 16;
-    pf.dwRGBAlphaBitMask = 0xF000;
-    pf.dwRBitMask = 0x0F00;
-    pf.dwGBitMask = 0x00F0;
-    pf.dwBBitMask = 0x000F;
-    cb(&pf, ctx);
-
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_BeginScene(void *s) { rdd_log("D3DDev[9] BeginScene"); (void)s; return DD_OK; }
-static HRESULT WINAPI D3DDev_EndScene(void *s) { rdd_log("D3DDev[10] EndScene"); (void)s; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetDirect3D(void *s, void **out) { rdd_log("D3DDev[11] GetDirect3D"); (void)s; *out = &g_d3d; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetCurrentViewport(void *s, void *a) { rdd_log("D3DDev[12] SetCurrentViewport"); (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetCurrentViewport(void *s, void **out) { rdd_log("D3DDev[13] GetCurrentViewport"); (void)s; *out = &g_d3dvp; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetRenderTarget(void *s, void *a, void *b) {
-    (void)s; (void)b;
-    if (a) g_render_target = (RDDSurface *)a;
-    rdd_log("D3DDev[14] SetRenderTarget: rt=%p", a);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_GetRenderTarget(void *s, void **out) {
-    (void)s;
-    if (g_render_target) {
-        g_render_target->refcount++;
-        *out = g_render_target;
-    } else if (g_primary && g_primary->back_buffer) {
-        g_primary->back_buffer->refcount++;
-        *out = g_primary->back_buffer;
-    } else {
-        *out = NULL;
-    }
-    rdd_log("D3DDev[15] GetRenderTarget: rt=%p", *out);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_Begin(void *s, void *a, void *b, void *c) { rdd_log("D3DDev[16] Begin"); (void)s; (void)a; (void)b; (void)c; return DD_OK; }
-static HRESULT WINAPI D3DDev_BeginIndexed(void *s, void *a, void *b, void *c, void *d, void *e) { rdd_log("D3DDev[17] BeginIndexed"); (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
-static HRESULT WINAPI D3DDev_Vertex(void *s, void *a) { (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI D3DDev_Index(void *s, void *a) { (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI D3DDev_End(void *s, void *a) { (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetRenderState(void *s, void *a, void *b) {
-    DWORD state = (DWORD)(DWORD_PTR)a;
-    (void)s;
-    if (b) {
-        *(DWORD*)b = (state < D3DDEV_MAX_RENDERSTATE) ? g_render_states[state] : 0;
-    }
-    rdd_log("D3DDev GetRenderState: state=%lu value=0x%lx",
-            (unsigned long)state, b ? (unsigned long)*(DWORD*)b : 0UL);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_SetRenderState(void *s, void *a, void *b) {
-    DWORD state = (DWORD)(DWORD_PTR)a;
-    DWORD value = (DWORD)(DWORD_PTR)b;
-    (void)s;
-    if (state < D3DDEV_MAX_RENDERSTATE)
-        g_render_states[state] = value;
-    rdd_log("D3DDev SetRenderState: state=%lu value=0x%lx",
-            (unsigned long)state, (unsigned long)value);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_GetLightState(void *s, void *a, void *b) {
-    DWORD state = (DWORD)(DWORD_PTR)a;
-    (void)s;
-    if (b) {
-        *(DWORD*)b = (state < D3DDEV_MAX_LIGHTSTATE) ? g_light_states[state] : 0;
-    }
-    rdd_log("D3DDev GetLightState: state=%lu value=0x%lx",
-            (unsigned long)state, b ? (unsigned long)*(DWORD*)b : 0UL);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_SetLightState(void *s, void *a, void *b) {
-    DWORD state = (DWORD)(DWORD_PTR)a;
-    DWORD value = (DWORD)(DWORD_PTR)b;
-    (void)s;
-    if (state < D3DDEV_MAX_LIGHTSTATE)
-        g_light_states[state] = value;
-    rdd_log("D3DDev SetLightState: state=%lu value=0x%lx",
-            (unsigned long)state, (unsigned long)value);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_SetTransform(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetTransform(void *s, void *a, void *b) {
-    /* Return identity matrix (4x4 floats) */
-    (void)s; (void)a;
-    if (b) {
-        float *m = (float *)b;
-        memset(m, 0, 16 * sizeof(float));
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_MultiplyTransform(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DDev_DrawPrimitive(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
-static HRESULT WINAPI D3DDev_DrawIndexedPrimitive(void *s, void *a, void *b, void *c, void *d, void *e, void *f, void *g) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetClipStatus(void *s, void *a) { (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetClipStatus(void *s, void *a) { (void)s; if (a) memset(a, 0, 32); return DD_OK; }
-static HRESULT WINAPI D3DDev_DrawPrimitiveStrided(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
-static HRESULT WINAPI D3DDev_DrawIndexedPrimitiveStrided(void *s, void *a, void *b, void *c, void *d, void *e, void *f, void *g) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return DD_OK; }
-static HRESULT WINAPI D3DDev_DrawPrimitiveVB(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
-static HRESULT WINAPI D3DDev_DrawIndexedPrimitiveVB(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
-static HRESULT WINAPI D3DDev_ComputeSphereVisibility(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetTexture(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetTexture(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetTextureStageState(void *s, void *a, void *b, void *c) {
-    DWORD stage = (DWORD)(DWORD_PTR)a;
-    DWORD state = (DWORD)(DWORD_PTR)b;
-    (void)s;
-    if (c) {
-        *(DWORD*)c = (stage < D3DDEV_MAX_TEXSTAGES && state < D3DDEV_MAX_TEXSTATE)
-                     ? g_texstage_states[stage][state] : 0;
-    }
-    rdd_log("D3DDev GetTextureStageState: stage=%lu state=%lu value=0x%lx",
-            (unsigned long)stage, (unsigned long)state,
-            c ? (unsigned long)*(DWORD*)c : 0UL);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_SetTextureStageState(void *s, void *a, void *b, void *c) {
-    DWORD stage = (DWORD)(DWORD_PTR)a;
-    DWORD state = (DWORD)(DWORD_PTR)b;
-    DWORD value = (DWORD)(DWORD_PTR)c;
-    (void)s;
-    if (stage < D3DDEV_MAX_TEXSTAGES && state < D3DDEV_MAX_TEXSTATE)
-        g_texstage_states[stage][state] = value;
-    rdd_log("D3DDev SetTextureStageState: stage=%lu state=%lu value=0x%lx",
-            (unsigned long)stage, (unsigned long)state, (unsigned long)value);
-    return DD_OK;
-}
-static HRESULT WINAPI D3DDev_ValidateDevice(void *s, void *a) { rdd_log("D3DDev[41] ValidateDevice"); (void)s; (void)a; return DD_OK; }
-
-static void *g_d3ddev_vtbl[42] = {
-    D3DDev_QueryInterface,         /* 0 */
-    D3DDev_AddRef,                 /* 1 */
-    D3DDev_Release,                /* 2 */
-    D3DDev_GetCaps,                /* 3 */
-    D3DDev_GetStats,               /* 4 */
-    D3DDev_AddViewport,            /* 5 */
-    D3DDev_DeleteViewport,         /* 6 */
-    D3DDev_NextViewport,           /* 7 */
-    D3DDev_EnumTextureFormats,     /* 8 */
-    D3DDev_BeginScene,             /* 9 */
-    D3DDev_EndScene,               /* 10 */
-    D3DDev_GetDirect3D,            /* 11 */
-    D3DDev_SetCurrentViewport,     /* 12 */
-    D3DDev_GetCurrentViewport,     /* 13 */
-    D3DDev_SetRenderTarget,        /* 14 */
-    D3DDev_GetRenderTarget,        /* 15 */
-    D3DDev_Begin,                  /* 16 */
-    D3DDev_BeginIndexed,           /* 17 */
-    D3DDev_Vertex,                 /* 18 */
-    D3DDev_Index,                  /* 19 */
-    D3DDev_End,                    /* 20 */
-    D3DDev_GetRenderState,         /* 21 */
-    D3DDev_SetRenderState,         /* 22 */
-    D3DDev_GetLightState,          /* 23 */
-    D3DDev_SetLightState,          /* 24 */
-    D3DDev_SetTransform,           /* 25 */
-    D3DDev_GetTransform,           /* 26 */
-    D3DDev_MultiplyTransform,      /* 27 */
-    D3DDev_DrawPrimitive,          /* 28 */
-    D3DDev_DrawIndexedPrimitive,   /* 29 */
-    D3DDev_SetClipStatus,          /* 30 */
-    D3DDev_GetClipStatus,          /* 31 */
-    D3DDev_DrawPrimitiveStrided,   /* 32 */
-    D3DDev_DrawIndexedPrimitiveStrided, /* 33 */
-    D3DDev_DrawPrimitiveVB,        /* 34 */
-    D3DDev_DrawIndexedPrimitiveVB, /* 35 */
-    D3DDev_ComputeSphereVisibility,/* 36 */
-    D3DDev_GetTexture,             /* 37 */
-    D3DDev_SetTexture,             /* 38 */
-    D3DDev_GetTextureStageState,   /* 39 */
-    D3DDev_SetTextureStageState,   /* 40 */
-    D3DDev_ValidateDevice          /* 41 */
-};
-
-static D3DDevObj g_d3ddev = { g_d3ddev_vtbl };
-
-/* ================================================================
- * Minimal IDirect3DViewport3 stub (21 methods)
- * ================================================================ */
-
-static HRESULT WINAPI D3DVP_QI(D3DVPObj *s, REFIID r, void **o) {
-    if (guid_eq(r, &MY_IID_IDirect3DViewport) || guid_eq(r, &MY_IID_IDirect3DViewport2) ||
-        guid_eq(r, &MY_IID_IDirect3DViewport3) || guid_eq(r, &MY_IID_IUnknown)) {
-        *o = s; rdd_log("D3DVP_QI: returning self"); return S_OK;
-    }
-    *o = NULL;
-    rdd_log("D3DVP_QI: E_NOINTERFACE {%08lx-...}", r->Data1);
-    return E_NOINTERFACE;
-}
-static ULONG WINAPI D3DVP_AddRef(D3DVPObj *s) { rdd_log("D3DVP_AddRef"); (void)s; return 2; }
-static ULONG WINAPI D3DVP_Release(D3DVPObj *s) { rdd_log("D3DVP_Release"); (void)s; return 1; }
-
-/* IDirect3DViewport3 vtable (21 entries):
- *  0 QI  1 AddRef  2 Release  3 Initialize(2)  4 GetViewport(2)
- *  5 SetViewport(2)  6 TransformVertices(5)  7 LightElements(3)
- *  8 SetBackground(2)  9 GetBackground(3)  10 SetBackgroundDepth(2)
- * 11 GetBackgroundDepth(3)  12 Clear(4)  13 AddLight(2)  14 DeleteLight(2)
- * 15 NextLight(4)  16 GetViewport2(2)  17 SetViewport2(2)
- * 18 SetBackgroundDepth2(2)  19 GetBackgroundDepth2(3)  20 Clear2(7)
- */
-static void *g_d3dvp_vtbl[21] = {
-    D3DVP_QI, D3DVP_AddRef, D3DVP_Release,
-    d3dd_stub2,  /* 3  Initialize */
-    d3dd_stub2,  /* 4  GetViewport */
-    d3dd_stub2,  /* 5  SetViewport */
-    d3dd_stub5,  /* 6  TransformVertices */
-    d3dd_stub3,  /* 7  LightElements */
-    d3dd_stub2,  /* 8  SetBackground */
-    d3dd_stub3,  /* 9  GetBackground */
-    d3dd_stub2,  /* 10 SetBackgroundDepth */
-    d3dd_stub3,  /* 11 GetBackgroundDepth */
-    d3dd_stub4,  /* 12 Clear */
-    d3dd_stub2,  /* 13 AddLight */
-    d3dd_stub2,  /* 14 DeleteLight */
-    d3dd_stub4,  /* 15 NextLight */
-    d3dd_stub2,  /* 16 GetViewport2 */
-    d3dd_stub2,  /* 17 SetViewport2 */
-    d3dd_stub2,  /* 18 SetBackgroundDepth2 */
-    d3dd_stub3,  /* 19 GetBackgroundDepth2 */
-    d3dd_stub7   /* 20 Clear2 */
-};
-
-static D3DVPObj g_d3dvp = { g_d3dvp_vtbl };
-
-/* ================================================================
- * Minimal IDirect3DMaterial3 stub (8 methods)
- * 0 QI  1 AddRef  2 Release  3 SetMaterial(2)  4 GetMaterial(2)
- * 5 GetHandle(3)
- * ================================================================ */
-
-typedef struct D3DMatObj D3DMatObj;
-/* D3DMATERIAL is 76 bytes. Store as raw bytes to avoid D3D type header dependency. */
-#define D3DMAT_DATA_SIZE 76
-struct D3DMatObj { void **lpVtbl; BYTE mat_data[D3DMAT_DATA_SIZE]; };
-
-static HRESULT WINAPI D3DMat_QI(D3DMatObj *s, REFIID r, void **o) { (void)s; (void)r; *o = NULL; return E_NOINTERFACE; }
-static ULONG WINAPI D3DMat_AddRef(D3DMatObj *s) { (void)s; return 2; }
-static ULONG WINAPI D3DMat_Release(D3DMatObj *s) { (void)s; return 1; }
-static HRESULT WINAPI D3DMat_SetMaterial(D3DMatObj *s, void *mat) {
-    if (mat) {
-        DWORD sz = *(DWORD*)mat;  /* dwSize is first field */
-        if (sz > D3DMAT_DATA_SIZE) sz = D3DMAT_DATA_SIZE;
-        memcpy(s->mat_data, mat, sz);
-        rdd_log("D3DMat_SetMaterial: copied %lu bytes", (unsigned long)sz);
-    }
-    return DD_OK;
-}
-static HRESULT WINAPI D3DMat_GetMaterial(D3DMatObj *s, void *mat) {
-    if (mat) {
-        DWORD sz = *(DWORD*)mat;  /* caller sets dwSize before calling */
-        if (sz == 0 || sz > D3DMAT_DATA_SIZE) sz = D3DMAT_DATA_SIZE;
-        memcpy(mat, s->mat_data, sz);
-        rdd_log("D3DMat_GetMaterial: returned %lu bytes", (unsigned long)sz);
-    }
-    return DD_OK;
-}
-
-static void *g_d3dmat_vtbl[6] = {
-    D3DMat_QI, D3DMat_AddRef, D3DMat_Release,
-    D3DMat_SetMaterial,  /* 3 SetMaterial */
-    D3DMat_GetMaterial,  /* 4 GetMaterial */
-    d3dd_stub3           /* 5 GetHandle */
-};
-
-static D3DMatObj g_d3dmat = { g_d3dmat_vtbl, {0} };
-
-/* ================================================================
- * Minimal IDirect3DLight stub (7 methods)
- * 0 QI  1 AddRef  2 Release  3 Initialize(2)  4 SetLight(2)
- * 5 GetLight(2)
- * ================================================================ */
-
-typedef struct D3DLightObj D3DLightObj;
-/* D3DLIGHT2 is 108 bytes. Store as raw bytes. */
-#define D3DLIGHT_DATA_SIZE 108
-struct D3DLightObj { void **lpVtbl; BYTE light_data[D3DLIGHT_DATA_SIZE]; };
-
-static HRESULT WINAPI D3DLight_QI(D3DLightObj *s, REFIID r, void **o) { (void)s; (void)r; *o = NULL; return E_NOINTERFACE; }
-static ULONG WINAPI D3DLight_AddRef(D3DLightObj *s) { (void)s; return 2; }
-static ULONG WINAPI D3DLight_Release(D3DLightObj *s) { (void)s; return 1; }
-static HRESULT WINAPI D3DLight_SetLight(D3DLightObj *s, void *light) {
-    if (light) {
-        DWORD sz = *(DWORD*)light;  /* dwSize is first field */
-        if (sz > D3DLIGHT_DATA_SIZE) sz = D3DLIGHT_DATA_SIZE;
-        memcpy(s->light_data, light, sz);
-        rdd_log("D3DLight_SetLight: copied %lu bytes", (unsigned long)sz);
-    }
-    return DD_OK;
-}
-static HRESULT WINAPI D3DLight_GetLight(D3DLightObj *s, void *light) {
-    if (light) {
-        DWORD sz = *(DWORD*)light;
-        if (sz == 0 || sz > D3DLIGHT_DATA_SIZE) sz = D3DLIGHT_DATA_SIZE;
-        memcpy(light, s->light_data, sz);
-        rdd_log("D3DLight_GetLight: returned %lu bytes", (unsigned long)sz);
-    }
-    return DD_OK;
-}
-
-static void *g_d3dlight_vtbl[6] = {
-    D3DLight_QI, D3DLight_AddRef, D3DLight_Release,
-    d3dd_stub2,          /* 3 Initialize */
-    D3DLight_SetLight,   /* 4 SetLight */
-    D3DLight_GetLight    /* 5 GetLight */
-};
-
-static D3DLightObj g_d3dlight = { g_d3dlight_vtbl, {0} };
-
-/* IDirect3D3 methods */
-/* GUID for RGB software rasterizer (standard DirectX GUID) */
-static const GUID MY_IID_IDirect3DRGBDevice =
-    {0xA4665C60,0x2673,0x11CF,{0xA3,0x1A,0x00,0xAA,0x00,0xB9,0x33,0x56}};
-
-static HRESULT WINAPI D3D_EnumDevices(D3DObj *s, void *cb_raw, void *ctx) {
-    /* Call the callback with a software RGB rasterizer device.
-     * The game needs this to initialize its 3D renderer. */
-    typedef HRESULT (WINAPI *EnumDevCB)(GUID*, char*, char*, void*, void*, void*);
-    EnumDevCB cb = (EnumDevCB)cb_raw;
-    char hal_desc[252];
-    char hel_desc[252];
-    (void)s;
-    fill_d3d_device_desc(hal_desc);
-    fill_d3d_device_desc(hel_desc);
-    rdd_log("D3D_EnumDevices: calling callback with RGB device");
-    if (cb) cb((GUID*)&MY_IID_IDirect3DRGBDevice,
-               "RGB Emulation", "Direct3D RGB Software Emulation",
-               hal_desc, hel_desc, ctx);
-    return DD_OK;
-}
-static HRESULT WINAPI D3D_CreateLight(D3DObj *s, void **l, void *o) { rdd_log("D3D_CreateLight"); (void)s; (void)o; *l = &g_d3dlight; return DD_OK; }
-static HRESULT WINAPI D3D_CreateMaterial(D3DObj *s, void **m, void *o) { rdd_log("D3D_CreateMaterial"); (void)s; (void)o; *m = &g_d3dmat; return DD_OK; }
-static HRESULT WINAPI D3D_CreateViewport(D3DObj *s, void **v, void *o) {
-    (void)s; (void)o;
-    rdd_log("D3D_CreateViewport: vp=%p vtbl=%p", (void*)&g_d3dvp, (void*)g_d3dvp.lpVtbl);
-    *v = &g_d3dvp;
-    return DD_OK;
-}
-static HRESULT WINAPI D3D_FindDevice(D3DObj *s, void *search, void *result) { rdd_log("D3D_FindDevice"); (void)s; (void)search; (void)result; return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI D3D_CreateDevice(D3DObj *s, REFCLSID c, void *surf, void **dev, void *o) {
-    (void)s; (void)c; (void)o;
-    if (surf) g_render_target = (RDDSurface *)surf;
-    rdd_log("D3D_CreateDevice: returning stub device, rt=%p", surf);
-    *dev = &g_d3ddev;
-    return DD_OK;
-}
-static HRESULT WINAPI D3D_CreateVertexBuffer(D3DObj *s, void *desc, void **vb, DWORD f, void *o) { rdd_log("D3D_CreateVertexBuffer"); (void)s; (void)desc; *vb = NULL; (void)f; (void)o; return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI D3D_EnumZBufferFormats(D3DObj *s, REFCLSID c, void *cb, void *ctx) { rdd_log("D3D_EnumZBufferFormats"); (void)s; (void)c; (void)cb; (void)ctx; return DD_OK; }
-static HRESULT WINAPI D3D_EvictManagedTextures(D3DObj *s) { rdd_log("D3D_EvictManagedTextures"); (void)s; return DD_OK; }
-
-struct D3DVtbl {
-    HRESULT (WINAPI *QueryInterface)(D3DObj*, REFIID, void**);
-    ULONG   (WINAPI *AddRef)(D3DObj*);
-    ULONG   (WINAPI *Release)(D3DObj*);
-    HRESULT (WINAPI *EnumDevices)(D3DObj*, void*, void*);
-    HRESULT (WINAPI *CreateLight)(D3DObj*, void**, void*);
-    HRESULT (WINAPI *CreateMaterial)(D3DObj*, void**, void*);
-    HRESULT (WINAPI *CreateViewport)(D3DObj*, void**, void*);
-    HRESULT (WINAPI *FindDevice)(D3DObj*, void*, void*);
-    HRESULT (WINAPI *CreateDevice)(D3DObj*, REFCLSID, void*, void**, void*);
-    HRESULT (WINAPI *CreateVertexBuffer)(D3DObj*, void*, void**, DWORD, void*);
-    HRESULT (WINAPI *EnumZBufferFormats)(D3DObj*, REFCLSID, void*, void*);
-    HRESULT (WINAPI *EvictManagedTextures)(D3DObj*);
-};
-
-static D3DVtbl g_d3d_vtbl = {
-    D3D_QueryInterface, D3D_AddRef, D3D_Release,
-    D3D_EnumDevices, D3D_CreateLight, D3D_CreateMaterial,
-    D3D_CreateViewport, D3D_FindDevice, D3D_CreateDevice,
-    D3D_CreateVertexBuffer, D3D_EnumZBufferFormats, D3D_EvictManagedTextures
-};
-
-static D3DObj g_d3d = { &g_d3d_vtbl };
-
-static HRESULT WINAPI D3D_QueryInterface(D3DObj *self, REFIID riid, void **out) {
-    (void)self;
-    if (guid_eq(riid, &MY_IID_IDirect3D) || guid_eq(riid, &MY_IID_IDirect3D2) ||
-        guid_eq(riid, &MY_IID_IDirect3D3)) {
-        g_dd_refcount++;
-        *out = &g_d3d;
-        return S_OK;
-    }
-    if (guid_eq(riid, &MY_IID_IDirectDraw4)) {
-        g_dd_refcount++;
-        *out = &g_dd4;
-        return S_OK;
-    }
-    *out = NULL;
-    return E_NOINTERFACE;
-}
-
-/* ================================================================
- * IDirectDraw4 methods (28 total)
- * ================================================================ */
-
-static HRESULT WINAPI DD4_QueryInterface(DD4Obj *self, REFIID riid, void **out) {
-    (void)self;
-    if (guid_eq(riid, &MY_IID_IDirectDraw) || guid_eq(riid, &MY_IID_IUnknown)) {
-        g_dd_refcount++;
-        *out = &g_dd1;
-        rdd_log("DD4_QI: returning IDirectDraw");
-        return S_OK;
-    }
-    if (guid_eq(riid, &MY_IID_IDirectDraw2) || guid_eq(riid, &MY_IID_IDirectDraw4)) {
-        g_dd_refcount++;
-        *out = &g_dd4;
-        rdd_log("DD4_QI: returning IDirectDraw4");
-        return S_OK;
-    }
-    if (guid_eq(riid, &MY_IID_IDirect3D) || guid_eq(riid, &MY_IID_IDirect3D2) ||
-        guid_eq(riid, &MY_IID_IDirect3D3)) {
-        g_dd_refcount++;
-        *out = &g_d3d;
-        rdd_log("DD4_QI: returning IDirect3D3 stub");
-        return S_OK;
-    }
-    *out = NULL;
-    rdd_log("DD4_QI: E_NOINTERFACE {%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
-            riid->Data1, riid->Data2, riid->Data3,
-            riid->Data4[0], riid->Data4[1], riid->Data4[2], riid->Data4[3],
-            riid->Data4[4], riid->Data4[5], riid->Data4[6], riid->Data4[7]);
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI DD4_AddRef(DD4Obj *self) {
-    (void)self;
-    return ++g_dd_refcount;
-}
-
-static ULONG WINAPI DD4_Release(DD4Obj *self) {
-    (void)self;
-    if (g_dd_refcount > 0) g_dd_refcount--;
-    return g_dd_refcount;
-}
-
-/* ================================================================
- * Minimal IDirectDrawClipper stub
- * ================================================================ */
-
-typedef struct RDDClipper RDDClipper;
-typedef struct RDDClipperVtbl RDDClipperVtbl;
-
-struct RDDClipper {
-    RDDClipperVtbl *lpVtbl;
-    ULONG refcount;
-    HWND hwnd;
-};
-
-static HRESULT WINAPI Clip_QueryInterface(RDDClipper *s, REFIID r, void **o)
-    { (void)s; (void)r; *o = NULL; return E_NOINTERFACE; }
-static ULONG WINAPI Clip_AddRef(RDDClipper *s) { return ++s->refcount; }
-static ULONG WINAPI Clip_Release(RDDClipper *s) {
-    ULONG ref = --s->refcount;
-    if (ref == 0) free(s);
     return ref;
 }
-static HRESULT WINAPI Clip_GetClipList(RDDClipper *s, LPRECT r, void *rgn, DWORD *sz)
-    { (void)s; (void)r; (void)rgn; (void)sz; return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI Clip_GetHWnd(RDDClipper *s, HWND *h)
-    { *h = s->hwnd; return DD_OK; }
-static HRESULT WINAPI Clip_Initialize(RDDClipper *s, void *dd, DWORD f)
-    { (void)s; (void)dd; (void)f; return DD_OK; }
-static HRESULT WINAPI Clip_IsClipListChanged(RDDClipper *s, BOOL *changed)
-    { (void)s; *changed = FALSE; return DD_OK; }
-static HRESULT WINAPI Clip_SetClipList(RDDClipper *s, void *rgn, DWORD f)
-    { (void)s; (void)rgn; (void)f; return DD_OK; }
-static HRESULT WINAPI Clip_SetHWnd(RDDClipper *s, DWORD f, HWND h)
-    { (void)f; s->hwnd = h; return DD_OK; }
 
-struct RDDClipperVtbl {
-    HRESULT (WINAPI *QueryInterface)(RDDClipper*, REFIID, void**);
-    ULONG   (WINAPI *AddRef)(RDDClipper*);
-    ULONG   (WINAPI *Release)(RDDClipper*);
-    HRESULT (WINAPI *GetClipList)(RDDClipper*, LPRECT, void*, DWORD*);
-    HRESULT (WINAPI *GetHWnd)(RDDClipper*, HWND*);
-    HRESULT (WINAPI *Initialize)(RDDClipper*, void*, DWORD);
-    HRESULT (WINAPI *IsClipListChanged)(RDDClipper*, BOOL*);
-    HRESULT (WINAPI *SetClipList)(RDDClipper*, void*, DWORD);
-    HRESULT (WINAPI *SetHWnd)(RDDClipper*, DWORD, HWND);
-};
-
-static RDDClipperVtbl g_clip_vtbl = {
-    Clip_QueryInterface, Clip_AddRef, Clip_Release,
-    Clip_GetClipList, Clip_GetHWnd, Clip_Initialize,
-    Clip_IsClipListChanged, Clip_SetClipList, Clip_SetHWnd
-};
-
-/* DD4 stubs */
-static HRESULT WINAPI DD4_Compact(DD4Obj *s)
-    { (void)s; return DD_OK; }
-static HRESULT WINAPI DD4_CreateClipper(DD4Obj *s, DWORD f, void **c, void *o) {
-    RDDClipper *clip;
-    (void)s; (void)f; (void)o;
-    clip = (RDDClipper *)calloc(1, sizeof(RDDClipper));
-    if (!clip) { *c = NULL; return DDERR_OUTOFMEMORY; }
-    clip->lpVtbl = &g_clip_vtbl;
-    clip->refcount = 1;
-    clip->hwnd = g_hwnd;
-    *c = clip;
-    rdd_log("DD4_CreateClipper: created");
-    return DD_OK;
-}
-static HRESULT WINAPI DD4_CreatePalette(DD4Obj *s, DWORD f, void *e, void **p, void *o)
-    { (void)s; (void)f; (void)e; (void)o; *p = NULL; rdd_log("DD4_CreatePalette: unsupported"); return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI DD4_DuplicateSurface(DD4Obj *s, RDDSurface *a, RDDSurface **b)
-    { rdd_log("DD4_DuplicateSurface: UNSUPPORTED"); (void)s; (void)a; *b = NULL; return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI DD4_EnumSurfaces(DD4Obj *s, DWORD f, LPDDSURFACEDESC2 d, void *c, void *cb)
-    { rdd_log("DD4_EnumSurfaces called"); (void)s; (void)f; (void)d; (void)c; (void)cb; return DD_OK; }
-static HRESULT WINAPI DD4_FlipToGDISurface(DD4Obj *s) {
-    (void)s;
-    rdd_log("DD4_FlipToGDISurface: presenting current frame");
-    if (g_primary) present_frame(g_primary);
-    return DD_OK;
-}
-static HRESULT WINAPI DD4_GetFourCCCodes(DD4Obj *s, DWORD *n, DWORD *c)
-    { (void)s; (void)c; *n = 0; return DD_OK; }
-static HRESULT WINAPI DD4_GetGDISurface(DD4Obj *s, RDDSurface **surf)
-    { (void)s; *surf = NULL; return DDERR_NOTFOUND; }
-static HRESULT WINAPI DD4_GetScanLine(DD4Obj *s, DWORD *sl)
-    { (void)s; *sl = 0; return DD_OK; }
-static HRESULT WINAPI DD4_Initialize(DD4Obj *s, GUID *g)
-    { (void)s; (void)g; return DDERR_ALREADYINITIALIZED; }
-static HRESULT WINAPI DD4_WaitForVerticalBlank(DD4Obj *s, DWORD f, HANDLE h)
-    { (void)s; (void)f; (void)h; return DD_OK; }
-static HRESULT WINAPI DD4_GetSurfaceFromDC(DD4Obj *s, HDC h, RDDSurface **surf)
-    { (void)s; (void)h; *surf = NULL; return DDERR_NOTFOUND; }
-static HRESULT WINAPI DD4_RestoreAllSurfaces(DD4Obj *s)
-    { (void)s; return DD_OK; }
-static HRESULT WINAPI DD4_TestCooperativeLevel(DD4Obj *s)
-    { (void)s; return DD_OK; }
-
-/* DD4 real implementations */
-
-static HRESULT WINAPI DD4_GetCaps(DD4Obj *self, LPDDCAPS hal, LPDDCAPS hel) {
-    (void)self;
-    if (hal) {
-        memset(hal, 0, sizeof(DDCAPS));
-        hal->dwSize = sizeof(DDCAPS);
-        hal->dwCaps = DDCAPS_BLT | DDCAPS_BLTCOLORFILL | DDCAPS_COLORKEY;
-        hal->dwCKeyCaps = DDCKEYCAPS_SRCBLT;
-        hal->dwVidMemTotal = 64 * 1024 * 1024;
-        hal->dwVidMemFree  = 64 * 1024 * 1024;
-    }
-    if (hel) {
-        memset(hel, 0, sizeof(DDCAPS));
-        hel->dwSize = sizeof(DDCAPS);
-        hel->dwCaps = DDCAPS_BLT | DDCAPS_BLTCOLORFILL | DDCAPS_COLORKEY;
-        hel->dwCKeyCaps = DDCKEYCAPS_SRCBLT;
-    }
-    return DD_OK;
+static HRESULT dd_create_surface_legacy_common(void *self, LPDDSURFACEDESC desc,
+                                               LPDIRECTDRAWSURFACE *out, IUnknown *outer)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, LPDDSURFACEDESC, LPDIRECTDRAWSURFACE *, IUnknown *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, LPDDSURFACEDESC, LPDIRECTDRAWSURFACE *, IUnknown *))
+        entry->orig_vtbl[6];
+    hr = orig(self, desc, out, outer);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, PROXY_SURF1);
+    return hr;
 }
 
-static HRESULT WINAPI DD4_GetDisplayMode(DD4Obj *self, LPDDSURFACEDESC2 desc) {
-    (void)self;
-    memset(desc, 0, sizeof(DDSURFACEDESC2));
-    desc->dwSize = sizeof(DDSURFACEDESC2);
-    desc->dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_REFRESHRATE;
-    desc->dwWidth = 640;
-    desc->dwHeight = 480;
-    desc->dwRefreshRate = 60;
-    fill_pixelformat_rgb565(&desc->ddpfPixelFormat);
-    return DD_OK;
+static HRESULT dd_create_surface4_common(void *self, LPDDSURFACEDESC2 desc,
+                                         LPDIRECTDRAWSURFACE4 *out, IUnknown *outer)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, LPDDSURFACEDESC2, LPDIRECTDRAWSURFACE4 *, IUnknown *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, LPDDSURFACEDESC2, LPDIRECTDRAWSURFACE4 *, IUnknown *))
+        entry->orig_vtbl[6];
+    hr = orig(self, desc, out, outer);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, PROXY_SURF4);
+    return hr;
 }
 
-static HRESULT WINAPI DD4_GetMonitorFrequency(DD4Obj *self, DWORD *freq) {
-    (void)self;
-    *freq = 60;
-    return DD_OK;
+static HRESULT dd_duplicate_surface_legacy_common(void *self, LPDIRECTDRAWSURFACE src,
+                                                  LPDIRECTDRAWSURFACE *out)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, LPDIRECTDRAWSURFACE, LPDIRECTDRAWSURFACE *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, LPDIRECTDRAWSURFACE, LPDIRECTDRAWSURFACE *))
+        entry->orig_vtbl[7];
+    hr = orig(self, src, out);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, PROXY_SURF1);
+    return hr;
 }
 
-static HRESULT WINAPI DD4_GetVerticalBlankStatus(DD4Obj *self, BOOL *status) {
-    (void)self;
-    *status = TRUE;
-    return DD_OK;
+static HRESULT dd_duplicate_surface4_common(void *self, LPDIRECTDRAWSURFACE4 src,
+                                            LPDIRECTDRAWSURFACE4 *out)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, LPDIRECTDRAWSURFACE4, LPDIRECTDRAWSURFACE4 *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, LPDIRECTDRAWSURFACE4, LPDIRECTDRAWSURFACE4 *))
+        entry->orig_vtbl[7];
+    hr = orig(self, src, out);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, PROXY_SURF4);
+    return hr;
 }
 
-static HRESULT WINAPI DD4_GetAvailableVidMem(DD4Obj *self, LPDDSCAPS2 caps, DWORD *total, DWORD *free_mem) {
-    (void)self; (void)caps;
-    if (total) *total = 64 * 1024 * 1024;
-    if (free_mem) *free_mem = 64 * 1024 * 1024;
-    return DD_OK;
+static HRESULT dd_get_gdi_surface_legacy_common(void *self, LPDIRECTDRAWSURFACE *out)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, LPDIRECTDRAWSURFACE *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, LPDIRECTDRAWSURFACE *))entry->orig_vtbl[14];
+    hr = orig(self, out);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, PROXY_SURF1);
+    return hr;
 }
 
-static HRESULT WINAPI DD4_GetDeviceIdentifier(DD4Obj *self, void *di_raw, DWORD flags) {
-    DDDEVICEIDENTIFIER *di = (DDDEVICEIDENTIFIER *)di_raw;
-    (void)self; (void)flags;
-    memset(di, 0, sizeof(DDDEVICEIDENTIFIER));
-    strncpy(di->szDescription, "Revenant DDraw", sizeof(di->szDescription) - 1);
-    strncpy(di->szDriver, "revenant_ddraw.dll", sizeof(di->szDriver) - 1);
-    return DD_OK;
+static HRESULT dd_get_gdi_surface4_common(void *self, LPDIRECTDRAWSURFACE4 *out)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, LPDIRECTDRAWSURFACE4 *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, LPDIRECTDRAWSURFACE4 *))entry->orig_vtbl[14];
+    hr = orig(self, out);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, PROXY_SURF4);
+    return hr;
 }
 
-static HRESULT WINAPI DD4_RestoreDisplayMode(DD4Obj *self) {
-    (void)self;
-    rdd_log("DD4_RestoreDisplayMode");
-    restore_window();
-    /* Post WM_DISPLAYCHANGE so the game knows the mode was restored.
-     * Real DirectDraw generates this after a physical mode change;
-     * we never actually change the mode, so we must send it manually.
-     * Use PostMessage (async) to avoid blocking the caller. */
-    if (g_hwnd)
-        PostMessageA(g_hwnd, WM_DISPLAYCHANGE, 16, MAKELPARAM(640, 480));
-    return DD_OK;
+static HRESULT dd_get_surface_from_dc_legacy_common(void *self, HDC hdc, LPDIRECTDRAWSURFACE *out)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, HDC, LPDIRECTDRAWSURFACE *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, HDC, LPDIRECTDRAWSURFACE *))entry->orig_vtbl[24];
+    hr = orig(self, hdc, out);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, PROXY_SURF1);
+    return hr;
 }
 
-static HRESULT WINAPI DD4_SetCooperativeLevel(DD4Obj *self, HWND hwnd, DWORD flags) {
-    (void)self;
-    rdd_log("DD4_SetCooperativeLevel: hwnd=%p flags=0x%lx", (void*)hwnd, flags);
+static HRESULT dd_get_surface_from_dc4_common(void *self, HDC hdc, LPDIRECTDRAWSURFACE4 *out)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, HDC, LPDIRECTDRAWSURFACE4 *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, HDC, LPDIRECTDRAWSURFACE4 *))entry->orig_vtbl[24];
+    hr = orig(self, hdc, out);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, PROXY_SURF4);
+    return hr;
+}
+
+static HRESULT dd_restore_display_mode_common(void *self)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *))entry->orig_vtbl[19];
+    hr = orig(self);
+    if (SUCCEEDED(hr)) restore_window();
+    return hr;
+}
+
+static HRESULT dd_set_cooperative_level_common(void *self, HWND hwnd, DWORD flags)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, HWND, DWORD);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, HWND, DWORD))entry->orig_vtbl[20];
     if (hwnd) g_hwnd = hwnd;
-
-    /* DDSCL_NORMAL (0x8): game is leaving exclusive mode (e.g. during exit) */
-    if (flags & DDSCL_NORMAL) {
-        restore_window();
-        if (g_hwnd)
-            PostMessageA(g_hwnd, WM_DISPLAYCHANGE, 16, MAKELPARAM(640, 480));
-    }
-
-    return DD_OK;
+    hr = orig(self, hwnd, flags);
+    if (SUCCEEDED(hr) && (flags & DDSCL_NORMAL)) restore_window();
+    return hr;
 }
 
-static void restore_window(void) {
-    rdd_log("restore_window: enter g_is_fullscreen=%d g_hwnd=%p",
-            g_is_fullscreen, (void*)g_hwnd);
-    if (!g_is_fullscreen || !g_hwnd) return;
-    g_is_fullscreen = FALSE;
-    rdd_log("restore_window: calling SetWindowPos to %ldx%ld",
-            g_orig_rect.right - g_orig_rect.left,
-            g_orig_rect.bottom - g_orig_rect.top);
-    SetWindowPos(g_hwnd, HWND_NOTOPMOST,
-                 g_orig_rect.left, g_orig_rect.top,
-                 g_orig_rect.right - g_orig_rect.left,
-                 g_orig_rect.bottom - g_orig_rect.top,
-                 SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS);
-    rdd_log("restore_window: SetWindowPos returned");
+static HRESULT dd_set_display_mode_legacy_common(void *self, DWORD w, DWORD h, DWORD bpp)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, DWORD, DWORD, DWORD);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, DWORD, DWORD, DWORD))entry->orig_vtbl[21];
+    hr = orig(self, w, h, bpp);
+    rdd_log("DD1 SetDisplayMode %lux%lux%lu hr=0x%08lx",
+            (unsigned long)w, (unsigned long)h, (unsigned long)bpp, (unsigned long)hr);
+    if (SUCCEEDED(hr)) setup_fullscreen_window();
+    return hr;
 }
 
-static void setup_fullscreen_window(void) {
-    int screen_w, screen_h;
-
-    if (!g_hwnd) return;
-
-    /* Save original window rect for restoration on exit */
-    GetWindowRect(g_hwnd, &g_orig_rect);
-
-    screen_w = GetSystemMetrics(SM_CXSCREEN);
-    screen_h = GetSystemMetrics(SM_CYSCREEN);
-
-    /* Just resize the window to fill the screen without changing its style.
-     * Changing to WS_POPUP causes Wine/Porting Kit to intercept Esc as
-     * "exit fullscreen", which kills the game. */
-    SetWindowPos(g_hwnd, HWND_TOP, 0, 0, screen_w, screen_h,
-                 SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS);
-
-    g_is_fullscreen = TRUE;
-    rdd_log("setup_fullscreen_window: %dx%d (saved orig %ldx%ld)",
-            screen_w, screen_h,
-            g_orig_rect.right - g_orig_rect.left,
-            g_orig_rect.bottom - g_orig_rect.top);
+static HRESULT dd_set_display_mode_modern_common(void *self, DWORD w, DWORD h, DWORD bpp,
+                                                 DWORD refresh, DWORD flags)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, DWORD, DWORD, DWORD, DWORD, DWORD);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, DWORD, DWORD, DWORD, DWORD, DWORD))entry->orig_vtbl[21];
+    hr = orig(self, w, h, bpp, refresh, flags);
+    rdd_log("DDx SetDisplayMode %lux%lux%lu refresh=%lu flags=0x%lx hr=0x%08lx",
+            (unsigned long)w, (unsigned long)h, (unsigned long)bpp,
+            (unsigned long)refresh, (unsigned long)flags, (unsigned long)hr);
+    if (SUCCEEDED(hr)) setup_fullscreen_window();
+    return hr;
 }
 
-static HRESULT WINAPI DD4_SetDisplayMode(DD4Obj *self, DWORD w, DWORD h, DWORD bpp,
-                                          DWORD refresh, DWORD flags) {
-    (void)self; (void)refresh; (void)flags;
-    rdd_log("DD4_SetDisplayMode: %lux%lux%lu (accepted, no mode change)", w, h, bpp);
-
-    /* Don't actually change the display mode. Just set up the window. */
-    setup_fullscreen_window();
-
-    return DD_OK;
+static HRESULT surface_blt_common(void *self, void *dst_rect, void *src, void *src_rect,
+                                  DWORD flags, LPDDBLTFX fx)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, void *, void *, void *, DWORD, LPDDBLTFX);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, void *, void *, void *, DWORD, LPDDBLTFX))
+        entry->orig_vtbl[5];
+    hr = orig(self, dst_rect, src, src_rect, flags, fx);
+    if (SUCCEEDED(hr)) maybe_present_primary(self, entry->kind, "Blt");
+    return hr;
 }
 
-static HRESULT WINAPI DD4_EnumDisplayModes(DD4Obj *self, DWORD flags, LPDDSURFACEDESC2 filter,
-                                            void *ctx, void *cb_raw) {
-    typedef HRESULT (WINAPI *EnumCB)(DDSURFACEDESC2 *, void *);
-    EnumCB cb = (EnumCB)cb_raw;
-    DDSURFACEDESC2 mode;
-    (void)self; (void)flags; (void)filter;
-
-    memset(&mode, 0, sizeof(mode));
-    mode.dwSize = sizeof(mode);
-    mode.dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_REFRESHRATE;
-    mode.dwWidth = 640;
-    mode.dwHeight = 480;
-    mode.dwRefreshRate = 60;
-    fill_pixelformat_rgb565(&mode.ddpfPixelFormat);
-
-    cb(&mode, ctx);
-    return DD_OK;
+static HRESULT surface_bltfast_common(void *self, DWORD x, DWORD y, void *src,
+                                      void *src_rect, DWORD trans)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, DWORD, DWORD, void *, void *, DWORD);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, DWORD, DWORD, void *, void *, DWORD))
+        entry->orig_vtbl[7];
+    hr = orig(self, x, y, src, src_rect, trans);
+    if (SUCCEEDED(hr)) maybe_present_primary(self, entry->kind, "BltFast");
+    return hr;
 }
 
-static HRESULT WINAPI DD4_CreateSurface(DD4Obj *self, LPDDSURFACEDESC2 desc,
-                                         RDDSurface **out, void *outer) {
-    DWORD caps;
-    (void)self; (void)outer;
+static HRESULT surface_flip_common(void *self, void *override, DWORD flags)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, void *, DWORD);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, void *, DWORD))entry->orig_vtbl[11];
+    hr = orig(self, override, flags);
+    if (SUCCEEDED(hr)) maybe_present_primary(self, entry->kind, "Flip");
+    return hr;
+}
 
-    caps = desc->ddsCaps.dwCaps;
-    rdd_log("DD4_CreateSurface: flags=0x%lx caps=0x%lx w=%lu h=%lu backbuf=%lu",
-            desc->dwFlags, caps, desc->dwWidth, desc->dwHeight, desc->dwBackBufferCount);
+static HRESULT surface_get_attached_legacy_common(void *self, LPDDSCAPS caps,
+                                                  LPDIRECTDRAWSURFACE *out)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, LPDDSCAPS, LPDIRECTDRAWSURFACE *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, LPDDSCAPS, LPDIRECTDRAWSURFACE *))
+        entry->orig_vtbl[12];
+    hr = orig(self, caps, out);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, entry->kind);
+    return hr;
+}
 
-    if (caps & DDSCAPS_PRIMARYSURFACE) {
-        RDDSurface *primary = alloc_surface(SURF_PRIMARY, 640, 480, 16, NULL, 0);
-        RDDSurface *backbuf = alloc_surface(SURF_BACKBUFFER, 640, 480, 16, NULL, 0);
-        if (!primary || !backbuf) {
-            if (primary) { free(primary->pixels); free(primary); }
-            if (backbuf) { free(backbuf->pixels); free(backbuf); }
-            return DDERR_OUTOFMEMORY;
-        }
-        primary->back_buffer = backbuf;
-        g_primary = primary;
-        *out = primary;
-        rdd_log("DD4_CreateSurface: created primary + backbuffer");
-        return DD_OK;
-    }
-
-    if ((caps & DDSCAPS_OFFSCREENPLAIN) || (caps & DDSCAPS_ZBUFFER) ||
-        (caps & DDSCAPS_TEXTURE) || (caps & DDSCAPS_3DDEVICE)) {
-        DWORD w = desc->dwWidth;
-        DWORD h = desc->dwHeight;
-        DWORD bpp = 16;
-        const char *kind = (caps & DDSCAPS_ZBUFFER) ? "zbuffer"
-                         : (caps & DDSCAPS_TEXTURE) ? "texture"
-                         : (caps & DDSCAPS_3DDEVICE) ? "3ddevice"
-                         : "offscreen";
-        if (w == 0) w = 640;
-        if (h == 0) h = 480;
-        /* Use the requested pixel format's bit depth */
-        if (desc->dwFlags & DDSD_PIXELFORMAT) {
-            DDPIXELFORMAT *pf = &desc->ddpfPixelFormat;
-            if (pf->dwRGBBitCount > 0)
-                bpp = pf->dwRGBBitCount;
-            else if (pf->dwZBufferBitDepth > 0)
-                bpp = pf->dwZBufferBitDepth;
-            else if (pf->dwFlags & DDPF_PALETTEINDEXED8)
-                bpp = 8;
-            else if (pf->dwFlags & DDPF_PALETTEINDEXED4)
-                bpp = 4;
-            rdd_log("  pixfmt: flags=0x%lx bpp=%lu R=0x%lx G=0x%lx B=0x%lx A=0x%lx",
-                    pf->dwFlags, bpp, pf->dwRBitMask, pf->dwGBitMask,
-                    pf->dwBBitMask, pf->dwRGBAlphaBitMask);
-        }
-        {
-        DDPIXELFORMAT *fmt = (desc->dwFlags & DDSD_PIXELFORMAT) ? &desc->ddpfPixelFormat : NULL;
-        *out = alloc_surface(SURF_OFFSCREEN, w, h, bpp, fmt, caps);
-        }
-        if (!*out) return DDERR_OUTOFMEMORY;
-        rdd_log("DD4_CreateSurface: created %s %lux%lux%lu", kind, w, h, bpp);
-        return DD_OK;
-    }
-
-    /* Treat any unrecognized caps as an offscreen plain surface.
-     * Some game UI paths (save dialog, etc.) may request surfaces
-     * with unusual cap combinations that would otherwise fail. */
-    {
-        DWORD w = desc->dwWidth;
-        DWORD h = desc->dwHeight;
-        DWORD bpp = 16;
-        DDPIXELFORMAT *fmt;
-        if (w == 0) w = 640;
-        if (h == 0) h = 480;
-        if (desc->dwFlags & DDSD_PIXELFORMAT) {
-            DDPIXELFORMAT *pf = &desc->ddpfPixelFormat;
-            if (pf->dwRGBBitCount > 0) bpp = pf->dwRGBBitCount;
-        }
-        fmt = (desc->dwFlags & DDSD_PIXELFORMAT) ? &desc->ddpfPixelFormat : NULL;
-        *out = alloc_surface(SURF_OFFSCREEN, w, h, bpp, fmt, caps);
-        if (!*out) return DDERR_OUTOFMEMORY;
-        rdd_log("DD4_CreateSurface: created fallback offscreen %lux%lux%lu for caps=0x%lx", w, h, bpp, caps);
-        return DD_OK;
-    }
+static HRESULT surface_get_attached4_common(void *self, LPDDSCAPS2 caps,
+                                            LPDIRECTDRAWSURFACE4 *out)
+{
+    ProxyEntry *entry = find_proxy(self);
+    HRESULT hr;
+    HRESULT (WINAPI *orig)(void *, LPDDSCAPS2, LPDIRECTDRAWSURFACE4 *);
+    if (!entry) return DDERR_GENERIC;
+    orig = (HRESULT (WINAPI *)(void *, LPDDSCAPS2, LPDIRECTDRAWSURFACE4 *))
+        entry->orig_vtbl[12];
+    hr = orig(self, caps, out);
+    if (SUCCEEDED(hr) && out && *out) install_proxy(*out, entry->kind);
+    return hr;
 }
 
 /* ================================================================
- * DD4 vtable definition
+ * Typed hook thunks
  * ================================================================ */
 
-struct DD4Vtbl {
-    HRESULT (WINAPI *QueryInterface)(DD4Obj*, REFIID, void**);
-    ULONG   (WINAPI *AddRef)(DD4Obj*);
-    ULONG   (WINAPI *Release)(DD4Obj*);
-    HRESULT (WINAPI *Compact)(DD4Obj*);
-    HRESULT (WINAPI *CreateClipper)(DD4Obj*, DWORD, void**, void*);
-    HRESULT (WINAPI *CreatePalette)(DD4Obj*, DWORD, void*, void**, void*);
-    HRESULT (WINAPI *CreateSurface)(DD4Obj*, LPDDSURFACEDESC2, RDDSurface**, void*);
-    HRESULT (WINAPI *DuplicateSurface)(DD4Obj*, RDDSurface*, RDDSurface**);
-    HRESULT (WINAPI *EnumDisplayModes)(DD4Obj*, DWORD, LPDDSURFACEDESC2, void*, void*);
-    HRESULT (WINAPI *EnumSurfaces)(DD4Obj*, DWORD, LPDDSURFACEDESC2, void*, void*);
-    HRESULT (WINAPI *FlipToGDISurface)(DD4Obj*);
-    HRESULT (WINAPI *GetCaps)(DD4Obj*, LPDDCAPS, LPDDCAPS);
-    HRESULT (WINAPI *GetDisplayMode)(DD4Obj*, LPDDSURFACEDESC2);
-    HRESULT (WINAPI *GetFourCCCodes)(DD4Obj*, DWORD*, DWORD*);
-    HRESULT (WINAPI *GetGDISurface)(DD4Obj*, RDDSurface**);
-    HRESULT (WINAPI *GetMonitorFrequency)(DD4Obj*, DWORD*);
-    HRESULT (WINAPI *GetScanLine)(DD4Obj*, DWORD*);
-    HRESULT (WINAPI *GetVerticalBlankStatus)(DD4Obj*, BOOL*);
-    HRESULT (WINAPI *Initialize)(DD4Obj*, GUID*);
-    HRESULT (WINAPI *RestoreDisplayMode)(DD4Obj*);
-    HRESULT (WINAPI *SetCooperativeLevel)(DD4Obj*, HWND, DWORD);
-    HRESULT (WINAPI *SetDisplayMode)(DD4Obj*, DWORD, DWORD, DWORD, DWORD, DWORD);
-    HRESULT (WINAPI *WaitForVerticalBlank)(DD4Obj*, DWORD, HANDLE);
-    HRESULT (WINAPI *GetAvailableVidMem)(DD4Obj*, LPDDSCAPS2, DWORD*, DWORD*);
-    HRESULT (WINAPI *GetSurfaceFromDC)(DD4Obj*, HDC, RDDSurface**);
-    HRESULT (WINAPI *RestoreAllSurfaces)(DD4Obj*);
-    HRESULT (WINAPI *TestCooperativeLevel)(DD4Obj*);
-    HRESULT (WINAPI *GetDeviceIdentifier)(DD4Obj*, void*, DWORD);
-};
+static HRESULT WINAPI DD1_QueryInterface_Hook(LPDIRECTDRAW self, REFIID riid, void **out)
+    { return proxy_query_interface_common(self, riid, out); }
+static HRESULT WINAPI DD2_QueryInterface_Hook(LPDIRECTDRAW2 self, REFIID riid, void **out)
+    { return proxy_query_interface_common(self, riid, out); }
+static HRESULT WINAPI DD3_QueryInterface_Hook(LPDIRECTDRAW3 self, REFIID riid, void **out)
+    { return proxy_query_interface_common(self, riid, out); }
+static HRESULT WINAPI DD4_QueryInterface_Hook(LPDIRECTDRAW4 self, REFIID riid, void **out)
+    { return proxy_query_interface_common(self, riid, out); }
+static ULONG WINAPI DD1_Release_Hook(LPDIRECTDRAW self)
+    { return proxy_release_common(self); }
+static ULONG WINAPI DD2_Release_Hook(LPDIRECTDRAW2 self)
+    { return proxy_release_common(self); }
+static ULONG WINAPI DD3_Release_Hook(LPDIRECTDRAW3 self)
+    { return proxy_release_common(self); }
+static ULONG WINAPI DD4_Release_Hook(LPDIRECTDRAW4 self)
+    { return proxy_release_common(self); }
+static HRESULT WINAPI DD1_CreateSurface_Hook(LPDIRECTDRAW self, LPDDSURFACEDESC desc, LPDIRECTDRAWSURFACE *out, IUnknown *outer)
+    { return dd_create_surface_legacy_common(self, desc, out, outer); }
+static HRESULT WINAPI DD2_CreateSurface_Hook(LPDIRECTDRAW2 self, LPDDSURFACEDESC desc, LPDIRECTDRAWSURFACE *out, IUnknown *outer)
+    { return dd_create_surface_legacy_common(self, desc, out, outer); }
+static HRESULT WINAPI DD3_CreateSurface_Hook(LPDIRECTDRAW3 self, LPDDSURFACEDESC desc, LPDIRECTDRAWSURFACE *out, IUnknown *outer)
+    { return dd_create_surface_legacy_common(self, desc, out, outer); }
+static HRESULT WINAPI DD4_CreateSurface_Hook(LPDIRECTDRAW4 self, LPDDSURFACEDESC2 desc, LPDIRECTDRAWSURFACE4 *out, IUnknown *outer)
+    { return dd_create_surface4_common(self, desc, out, outer); }
+static HRESULT WINAPI DD1_DuplicateSurface_Hook(LPDIRECTDRAW self, LPDIRECTDRAWSURFACE src, LPDIRECTDRAWSURFACE *out)
+    { return dd_duplicate_surface_legacy_common(self, src, out); }
+static HRESULT WINAPI DD2_DuplicateSurface_Hook(LPDIRECTDRAW2 self, LPDIRECTDRAWSURFACE src, LPDIRECTDRAWSURFACE *out)
+    { return dd_duplicate_surface_legacy_common(self, src, out); }
+static HRESULT WINAPI DD3_DuplicateSurface_Hook(LPDIRECTDRAW3 self, LPDIRECTDRAWSURFACE src, LPDIRECTDRAWSURFACE *out)
+    { return dd_duplicate_surface_legacy_common(self, src, out); }
+static HRESULT WINAPI DD4_DuplicateSurface_Hook(LPDIRECTDRAW4 self, LPDIRECTDRAWSURFACE4 src, LPDIRECTDRAWSURFACE4 *out)
+    { return dd_duplicate_surface4_common(self, src, out); }
+static HRESULT WINAPI DD1_GetGDISurface_Hook(LPDIRECTDRAW self, LPDIRECTDRAWSURFACE *out)
+    { return dd_get_gdi_surface_legacy_common(self, out); }
+static HRESULT WINAPI DD2_GetGDISurface_Hook(LPDIRECTDRAW2 self, LPDIRECTDRAWSURFACE *out)
+    { return dd_get_gdi_surface_legacy_common(self, out); }
+static HRESULT WINAPI DD3_GetGDISurface_Hook(LPDIRECTDRAW3 self, LPDIRECTDRAWSURFACE *out)
+    { return dd_get_gdi_surface_legacy_common(self, out); }
+static HRESULT WINAPI DD4_GetGDISurface_Hook(LPDIRECTDRAW4 self, LPDIRECTDRAWSURFACE4 *out)
+    { return dd_get_gdi_surface4_common(self, out); }
+static HRESULT WINAPI DD3_GetSurfaceFromDC_Hook(LPDIRECTDRAW3 self, HDC hdc, LPDIRECTDRAWSURFACE *out)
+    { return dd_get_surface_from_dc_legacy_common(self, hdc, out); }
+static HRESULT WINAPI DD4_GetSurfaceFromDC_Hook(LPDIRECTDRAW4 self, HDC hdc, LPDIRECTDRAWSURFACE4 *out)
+    { return dd_get_surface_from_dc4_common(self, hdc, out); }
+static HRESULT WINAPI DD1_RestoreDisplayMode_Hook(LPDIRECTDRAW self)
+    { return dd_restore_display_mode_common(self); }
+static HRESULT WINAPI DD2_RestoreDisplayMode_Hook(LPDIRECTDRAW2 self)
+    { return dd_restore_display_mode_common(self); }
+static HRESULT WINAPI DD3_RestoreDisplayMode_Hook(LPDIRECTDRAW3 self)
+    { return dd_restore_display_mode_common(self); }
+static HRESULT WINAPI DD4_RestoreDisplayMode_Hook(LPDIRECTDRAW4 self)
+    { return dd_restore_display_mode_common(self); }
+static HRESULT WINAPI DD1_SetCooperativeLevel_Hook(LPDIRECTDRAW self, HWND hwnd, DWORD flags)
+    { return dd_set_cooperative_level_common(self, hwnd, flags); }
+static HRESULT WINAPI DD2_SetCooperativeLevel_Hook(LPDIRECTDRAW2 self, HWND hwnd, DWORD flags)
+    { return dd_set_cooperative_level_common(self, hwnd, flags); }
+static HRESULT WINAPI DD3_SetCooperativeLevel_Hook(LPDIRECTDRAW3 self, HWND hwnd, DWORD flags)
+    { return dd_set_cooperative_level_common(self, hwnd, flags); }
+static HRESULT WINAPI DD4_SetCooperativeLevel_Hook(LPDIRECTDRAW4 self, HWND hwnd, DWORD flags)
+    { return dd_set_cooperative_level_common(self, hwnd, flags); }
+static HRESULT WINAPI DD1_SetDisplayMode_Hook(LPDIRECTDRAW self, DWORD w, DWORD h, DWORD bpp)
+    { return dd_set_display_mode_legacy_common(self, w, h, bpp); }
+static HRESULT WINAPI DD2_SetDisplayMode_Hook(LPDIRECTDRAW2 self, DWORD w, DWORD h, DWORD bpp, DWORD refresh, DWORD flags)
+    { return dd_set_display_mode_modern_common(self, w, h, bpp, refresh, flags); }
+static HRESULT WINAPI DD3_SetDisplayMode_Hook(LPDIRECTDRAW3 self, DWORD w, DWORD h, DWORD bpp, DWORD refresh, DWORD flags)
+    { return dd_set_display_mode_modern_common(self, w, h, bpp, refresh, flags); }
+static HRESULT WINAPI DD4_SetDisplayMode_Hook(LPDIRECTDRAW4 self, DWORD w, DWORD h, DWORD bpp, DWORD refresh, DWORD flags)
+    { return dd_set_display_mode_modern_common(self, w, h, bpp, refresh, flags); }
 
-static DD4Vtbl g_dd4_vtbl = {
-    DD4_QueryInterface,         /* 0 */
-    DD4_AddRef,                 /* 1 */
-    DD4_Release,                /* 2 */
-    DD4_Compact,                /* 3 */
-    DD4_CreateClipper,          /* 4 */
-    DD4_CreatePalette,          /* 5 */
-    DD4_CreateSurface,          /* 6 */
-    DD4_DuplicateSurface,       /* 7 */
-    DD4_EnumDisplayModes,       /* 8 */
-    DD4_EnumSurfaces,           /* 9 */
-    DD4_FlipToGDISurface,       /* 10 */
-    DD4_GetCaps,                /* 11 */
-    DD4_GetDisplayMode,         /* 12 */
-    DD4_GetFourCCCodes,         /* 13 */
-    DD4_GetGDISurface,          /* 14 */
-    DD4_GetMonitorFrequency,    /* 15 */
-    DD4_GetScanLine,            /* 16 */
-    DD4_GetVerticalBlankStatus, /* 17 */
-    DD4_Initialize,             /* 18 */
-    DD4_RestoreDisplayMode,     /* 19 */
-    DD4_SetCooperativeLevel,    /* 20 */
-    DD4_SetDisplayMode,         /* 21 */
-    DD4_WaitForVerticalBlank,   /* 22 */
-    DD4_GetAvailableVidMem,     /* 23 */
-    DD4_GetSurfaceFromDC,       /* 24 */
-    DD4_RestoreAllSurfaces,     /* 25 */
-    DD4_TestCooperativeLevel,   /* 26 */
-    DD4_GetDeviceIdentifier     /* 27 */
-};
+static HRESULT WINAPI Surf1_QueryInterface_Hook(LPDIRECTDRAWSURFACE self, REFIID riid, void **out)
+    { return proxy_query_interface_common(self, riid, out); }
+static HRESULT WINAPI Surf2_QueryInterface_Hook(LPDIRECTDRAWSURFACE2 self, REFIID riid, void **out)
+    { return proxy_query_interface_common(self, riid, out); }
+static HRESULT WINAPI Surf3_QueryInterface_Hook(LPDIRECTDRAWSURFACE3 self, REFIID riid, void **out)
+    { return proxy_query_interface_common(self, riid, out); }
+static HRESULT WINAPI Surf4_QueryInterface_Hook(LPDIRECTDRAWSURFACE4 self, REFIID riid, void **out)
+    { return proxy_query_interface_common(self, riid, out); }
+static ULONG WINAPI Surf1_Release_Hook(LPDIRECTDRAWSURFACE self)
+    { return proxy_release_common(self); }
+static ULONG WINAPI Surf2_Release_Hook(LPDIRECTDRAWSURFACE2 self)
+    { return proxy_release_common(self); }
+static ULONG WINAPI Surf3_Release_Hook(LPDIRECTDRAWSURFACE3 self)
+    { return proxy_release_common(self); }
+static ULONG WINAPI Surf4_Release_Hook(LPDIRECTDRAWSURFACE4 self)
+    { return proxy_release_common(self); }
+static HRESULT WINAPI Surf1_Blt_Hook(LPDIRECTDRAWSURFACE self, LPRECT dst, LPDIRECTDRAWSURFACE src, LPRECT src_rect, DWORD flags, LPDDBLTFX fx)
+    { return surface_blt_common(self, dst, src, src_rect, flags, fx); }
+static HRESULT WINAPI Surf2_Blt_Hook(LPDIRECTDRAWSURFACE2 self, LPRECT dst, LPDIRECTDRAWSURFACE2 src, LPRECT src_rect, DWORD flags, LPDDBLTFX fx)
+    { return surface_blt_common(self, dst, src, src_rect, flags, fx); }
+static HRESULT WINAPI Surf3_Blt_Hook(LPDIRECTDRAWSURFACE3 self, LPRECT dst, LPDIRECTDRAWSURFACE3 src, LPRECT src_rect, DWORD flags, LPDDBLTFX fx)
+    { return surface_blt_common(self, dst, src, src_rect, flags, fx); }
+static HRESULT WINAPI Surf4_Blt_Hook(LPDIRECTDRAWSURFACE4 self, LPRECT dst, LPDIRECTDRAWSURFACE4 src, LPRECT src_rect, DWORD flags, LPDDBLTFX fx)
+    { return surface_blt_common(self, dst, src, src_rect, flags, fx); }
+static HRESULT WINAPI Surf1_BltFast_Hook(LPDIRECTDRAWSURFACE self, DWORD x, DWORD y, LPDIRECTDRAWSURFACE src, LPRECT src_rect, DWORD trans)
+    { return surface_bltfast_common(self, x, y, src, src_rect, trans); }
+static HRESULT WINAPI Surf2_BltFast_Hook(LPDIRECTDRAWSURFACE2 self, DWORD x, DWORD y, LPDIRECTDRAWSURFACE2 src, LPRECT src_rect, DWORD trans)
+    { return surface_bltfast_common(self, x, y, src, src_rect, trans); }
+static HRESULT WINAPI Surf3_BltFast_Hook(LPDIRECTDRAWSURFACE3 self, DWORD x, DWORD y, LPDIRECTDRAWSURFACE3 src, LPRECT src_rect, DWORD trans)
+    { return surface_bltfast_common(self, x, y, src, src_rect, trans); }
+static HRESULT WINAPI Surf4_BltFast_Hook(LPDIRECTDRAWSURFACE4 self, DWORD x, DWORD y, LPDIRECTDRAWSURFACE4 src, LPRECT src_rect, DWORD trans)
+    { return surface_bltfast_common(self, x, y, src, src_rect, trans); }
+static HRESULT WINAPI Surf1_Flip_Hook(LPDIRECTDRAWSURFACE self, LPDIRECTDRAWSURFACE override, DWORD flags)
+    { return surface_flip_common(self, override, flags); }
+static HRESULT WINAPI Surf2_Flip_Hook(LPDIRECTDRAWSURFACE2 self, LPDIRECTDRAWSURFACE2 override, DWORD flags)
+    { return surface_flip_common(self, override, flags); }
+static HRESULT WINAPI Surf3_Flip_Hook(LPDIRECTDRAWSURFACE3 self, LPDIRECTDRAWSURFACE3 override, DWORD flags)
+    { return surface_flip_common(self, override, flags); }
+static HRESULT WINAPI Surf4_Flip_Hook(LPDIRECTDRAWSURFACE4 self, LPDIRECTDRAWSURFACE4 override, DWORD flags)
+    { return surface_flip_common(self, override, flags); }
+static HRESULT WINAPI Surf1_GetAttachedSurface_Hook(LPDIRECTDRAWSURFACE self, LPDDSCAPS caps, LPDIRECTDRAWSURFACE *out)
+    { return surface_get_attached_legacy_common(self, caps, out); }
+static HRESULT WINAPI Surf2_GetAttachedSurface_Hook(LPDIRECTDRAWSURFACE2 self, LPDDSCAPS caps, LPDIRECTDRAWSURFACE2 *out)
+    { return surface_get_attached_legacy_common(self, caps, (LPDIRECTDRAWSURFACE *)out); }
+static HRESULT WINAPI Surf3_GetAttachedSurface_Hook(LPDIRECTDRAWSURFACE3 self, LPDDSCAPS caps, LPDIRECTDRAWSURFACE3 *out)
+    { return surface_get_attached_legacy_common(self, caps, (LPDIRECTDRAWSURFACE *)out); }
+static HRESULT WINAPI Surf4_GetAttachedSurface_Hook(LPDIRECTDRAWSURFACE4 self, LPDDSCAPS2 caps, LPDIRECTDRAWSURFACE4 *out)
+    { return surface_get_attached4_common(self, caps, out); }
 
 /* ================================================================
- * IDirectDraw v1 methods (23 total, thin wrapper for QI upgrade)
+ * Exported entry points
  * ================================================================ */
 
-static HRESULT WINAPI DD1_QueryInterface(DD1Obj *self, REFIID riid, void **out) {
-    (void)self;
-    if (guid_eq(riid, &MY_IID_IDirectDraw) || guid_eq(riid, &MY_IID_IUnknown)) {
-        g_dd_refcount++;
-        *out = &g_dd1;
-        rdd_log("DD1_QI: returning IDirectDraw");
-        return S_OK;
-    }
-    if (guid_eq(riid, &MY_IID_IDirectDraw2) || guid_eq(riid, &MY_IID_IDirectDraw4)) {
-        g_dd_refcount++;
-        *out = &g_dd4;
-        rdd_log("DD1_QI: returning IDirectDraw4");
-        return S_OK;
-    }
-    if (guid_eq(riid, &MY_IID_IDirect3D) || guid_eq(riid, &MY_IID_IDirect3D2) ||
-        guid_eq(riid, &MY_IID_IDirect3D3)) {
-        g_dd_refcount++;
-        *out = &g_d3d;
-        rdd_log("DD1_QI: returning IDirect3D3 stub");
-        return S_OK;
-    }
-    *out = NULL;
-    rdd_log("DD1_QI: E_NOINTERFACE {%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
-            riid->Data1, riid->Data2, riid->Data3,
-            riid->Data4[0], riid->Data4[1], riid->Data4[2], riid->Data4[3],
-            riid->Data4[4], riid->Data4[5], riid->Data4[6], riid->Data4[7]);
-    return E_NOINTERFACE;
+HRESULT WINAPI DirectDrawCreate(GUID *driver, LPDIRECTDRAW *ddraw, IUnknown *outer)
+{
+    HRESULT hr;
+    if (!load_real_ddraw()) return DDERR_GENERIC;
+    hr = g_real_DirectDrawCreate(driver, ddraw, outer);
+    if (SUCCEEDED(hr) && ddraw && *ddraw) install_proxy(*ddraw, PROXY_DD1);
+    return hr;
 }
 
-static ULONG WINAPI DD1_AddRef(DD1Obj *self) { (void)self; return ++g_dd_refcount; }
-static ULONG WINAPI DD1_Release(DD1Obj *self) {
-    (void)self;
-    if (g_dd_refcount > 0) g_dd_refcount--;
-    return g_dd_refcount;
+HRESULT WINAPI DirectDrawCreateEx(GUID *driver, void **ddraw, REFIID iid, IUnknown *outer)
+{
+    HRESULT hr;
+    ProxyKind kind;
+
+    if (!load_real_ddraw()) return DDERR_GENERIC;
+    hr = g_real_DirectDrawCreateEx(driver, ddraw, iid, outer);
+    if (SUCCEEDED(hr) && ddraw && *ddraw && dd_kind_from_iid(iid, &kind))
+        install_proxy(*ddraw, kind);
+    return hr;
 }
 
-/* DD1 stubs - these use void* for v1-specific param types we don't implement */
-static HRESULT WINAPI DD1_Compact(DD1Obj *s) { (void)s; return DD_OK; }
-static HRESULT WINAPI DD1_CreateClipper(DD1Obj *s, DWORD f, void **c, void *o)
-    { (void)s; (void)f; (void)o; *c = NULL; return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI DD1_CreatePalette(DD1Obj *s, DWORD f, void *e, void **p, void *o)
-    { (void)s; (void)f; (void)e; (void)o; *p = NULL; return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI DD1_CreateSurface_v1(DD1Obj *s, void *desc, void **out, void *o)
-    { (void)s; (void)desc; (void)o; *out = NULL; rdd_log("DD1_CreateSurface_v1: not implemented"); return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI DD1_DuplicateSurface(DD1Obj *s, void *a, void **b)
-    { (void)s; (void)a; *b = NULL; return DDERR_UNSUPPORTED; }
-static HRESULT WINAPI DD1_EnumDisplayModes(DD1Obj *s, DWORD f, void *d, void *c, void *cb)
-    { (void)s; (void)f; (void)d; (void)c; (void)cb; return DD_OK; }
-static HRESULT WINAPI DD1_EnumSurfaces(DD1Obj *s, DWORD f, void *d, void *c, void *cb)
-    { (void)s; (void)f; (void)d; (void)c; (void)cb; return DD_OK; }
-static HRESULT WINAPI DD1_FlipToGDISurface(DD1Obj *s) {
-    (void)s;
-    rdd_log("DD1_FlipToGDISurface: presenting current frame");
-    if (g_primary) present_frame(g_primary);
-    return DD_OK;
-}
-static HRESULT WINAPI DD1_GetCaps(DD1Obj *s, LPDDCAPS h, LPDDCAPS e)
-    { (void)s; return DD4_GetCaps(NULL, h, e); }
-static HRESULT WINAPI DD1_GetDisplayMode_v1(DD1Obj *s, void *desc) {
-    /* Game shouldn't call this on v1 interface, but handle it */
-    DDSURFACEDESC *d = (DDSURFACEDESC *)desc;
-    (void)s;
-    if (d) {
-        memset(d, 0, sizeof(DDSURFACEDESC));
-        d->dwSize = sizeof(DDSURFACEDESC);
-        d->dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
-        d->dwWidth = 640;
-        d->dwHeight = 480;
-        fill_pixelformat_rgb565(&d->ddpfPixelFormat);
-    }
-    return DD_OK;
-}
-static HRESULT WINAPI DD1_GetFourCCCodes(DD1Obj *s, DWORD *n, DWORD *c)
-    { (void)s; (void)c; *n = 0; return DD_OK; }
-static HRESULT WINAPI DD1_GetGDISurface(DD1Obj *s, void **surf)
-    { (void)s; *surf = NULL; return DDERR_NOTFOUND; }
-static HRESULT WINAPI DD1_GetMonitorFrequency(DD1Obj *s, DWORD *f)
-    { (void)s; *f = 60; return DD_OK; }
-static HRESULT WINAPI DD1_GetScanLine(DD1Obj *s, DWORD *sl)
-    { (void)s; *sl = 0; return DD_OK; }
-static HRESULT WINAPI DD1_GetVerticalBlankStatus(DD1Obj *s, BOOL *st)
-    { (void)s; *st = TRUE; return DD_OK; }
-static HRESULT WINAPI DD1_Initialize(DD1Obj *s, GUID *g)
-    { (void)s; (void)g; return DDERR_ALREADYINITIALIZED; }
-static HRESULT WINAPI DD1_RestoreDisplayMode(DD1Obj *s) { (void)s; return DD_OK; }
-
-static HRESULT WINAPI DD1_SetCooperativeLevel(DD1Obj *self, HWND hwnd, DWORD flags) {
-    (void)self;
-    rdd_log("DD1_SetCooperativeLevel: hwnd=%p flags=0x%lx", (void*)hwnd, flags);
-    if (hwnd) g_hwnd = hwnd;
-    return DD_OK;
+HRESULT WINAPI DirectDrawCreateClipper(DWORD flags, LPDIRECTDRAWCLIPPER *clipper, IUnknown *outer)
+{
+    if (!load_real_ddraw()) return DDERR_GENERIC;
+    return g_real_DirectDrawCreateClipper(flags, clipper, outer);
 }
 
-static HRESULT WINAPI DD1_SetDisplayMode_v1(DD1Obj *self, DWORD w, DWORD h, DWORD bpp) {
-    (void)self;
-    rdd_log("DD1_SetDisplayMode_v1: %lux%lux%lu", w, h, bpp);
-    setup_fullscreen_window();
-    return DD_OK;
+HRESULT WINAPI DirectDrawEnumerateA(LPDDENUMCALLBACKA cb, void *ctx)
+{
+    if (!load_real_ddraw()) return DDERR_GENERIC;
+    return g_real_DirectDrawEnumerateA(cb, ctx);
 }
 
-static HRESULT WINAPI DD1_WaitForVerticalBlank(DD1Obj *s, DWORD f, HANDLE h)
-    { (void)s; (void)f; (void)h; return DD_OK; }
-
-/* ================================================================
- * DD1 vtable definition
- * ================================================================ */
-
-struct DD1Vtbl {
-    HRESULT (WINAPI *QueryInterface)(DD1Obj*, REFIID, void**);
-    ULONG   (WINAPI *AddRef)(DD1Obj*);
-    ULONG   (WINAPI *Release)(DD1Obj*);
-    HRESULT (WINAPI *Compact)(DD1Obj*);
-    HRESULT (WINAPI *CreateClipper)(DD1Obj*, DWORD, void**, void*);
-    HRESULT (WINAPI *CreatePalette)(DD1Obj*, DWORD, void*, void**, void*);
-    HRESULT (WINAPI *CreateSurface_v1)(DD1Obj*, void*, void**, void*);
-    HRESULT (WINAPI *DuplicateSurface)(DD1Obj*, void*, void**);
-    HRESULT (WINAPI *EnumDisplayModes)(DD1Obj*, DWORD, void*, void*, void*);
-    HRESULT (WINAPI *EnumSurfaces)(DD1Obj*, DWORD, void*, void*, void*);
-    HRESULT (WINAPI *FlipToGDISurface)(DD1Obj*);
-    HRESULT (WINAPI *GetCaps)(DD1Obj*, LPDDCAPS, LPDDCAPS);
-    HRESULT (WINAPI *GetDisplayMode_v1)(DD1Obj*, void*);
-    HRESULT (WINAPI *GetFourCCCodes)(DD1Obj*, DWORD*, DWORD*);
-    HRESULT (WINAPI *GetGDISurface)(DD1Obj*, void**);
-    HRESULT (WINAPI *GetMonitorFrequency)(DD1Obj*, DWORD*);
-    HRESULT (WINAPI *GetScanLine)(DD1Obj*, DWORD*);
-    HRESULT (WINAPI *GetVerticalBlankStatus)(DD1Obj*, BOOL*);
-    HRESULT (WINAPI *Initialize)(DD1Obj*, GUID*);
-    HRESULT (WINAPI *RestoreDisplayMode)(DD1Obj*);
-    HRESULT (WINAPI *SetCooperativeLevel)(DD1Obj*, HWND, DWORD);
-    HRESULT (WINAPI *SetDisplayMode_v1)(DD1Obj*, DWORD, DWORD, DWORD);
-    HRESULT (WINAPI *WaitForVerticalBlank)(DD1Obj*, DWORD, HANDLE);
-};
-
-static DD1Vtbl g_dd1_vtbl = {
-    DD1_QueryInterface,         /* 0 */
-    DD1_AddRef,                 /* 1 */
-    DD1_Release,                /* 2 */
-    DD1_Compact,                /* 3 */
-    DD1_CreateClipper,          /* 4 */
-    DD1_CreatePalette,          /* 5 */
-    DD1_CreateSurface_v1,       /* 6 */
-    DD1_DuplicateSurface,       /* 7 */
-    DD1_EnumDisplayModes,       /* 8 */
-    DD1_EnumSurfaces,           /* 9 */
-    DD1_FlipToGDISurface,       /* 10 */
-    DD1_GetCaps,                /* 11 */
-    DD1_GetDisplayMode_v1,      /* 12 */
-    DD1_GetFourCCCodes,         /* 13 */
-    DD1_GetGDISurface,          /* 14 */
-    DD1_GetMonitorFrequency,    /* 15 */
-    DD1_GetScanLine,            /* 16 */
-    DD1_GetVerticalBlankStatus, /* 17 */
-    DD1_Initialize,             /* 18 */
-    DD1_RestoreDisplayMode,     /* 19 */
-    DD1_SetCooperativeLevel,    /* 20 */
-    DD1_SetDisplayMode_v1,      /* 21 */
-    DD1_WaitForVerticalBlank    /* 22 */
-};
-
-/* ================================================================
- * DLL Exports
- * ================================================================ */
-
-HRESULT WINAPI DirectDrawCreate(GUID *driver, LPDIRECTDRAW *ddraw, IUnknown *outer) {
-    (void)driver; (void)outer;
-    rdd_log("DirectDrawCreate called");
-
-    if (!g_initialized) {
-        init_lut();
-        init_bmi();
-        g_present_buf = (DWORD *)malloc(640 * 480 * sizeof(DWORD));
-        g_dd4.lpVtbl = &g_dd4_vtbl;
-        g_dd1.lpVtbl = &g_dd1_vtbl;
-        g_initialized = TRUE;
-    }
-
-    g_dd_refcount++;
-    *ddraw = (LPDIRECTDRAW)(void *)&g_dd1;
-    return DD_OK;
+HRESULT WINAPI DirectDrawEnumerateExA(LPDDENUMCALLBACKEXA cb, void *ctx, DWORD flags)
+{
+    if (!load_real_ddraw()) return DDERR_GENERIC;
+    return g_real_DirectDrawEnumerateExA(cb, ctx, flags);
 }
 
-HRESULT WINAPI DirectDrawCreateEx(GUID *driver, void **ddraw, REFIID iid, IUnknown *outer) {
-    (void)driver; (void)outer;
-    rdd_log("DirectDrawCreateEx called");
-
-    if (!g_initialized) {
-        init_lut();
-        init_bmi();
-        g_present_buf = (DWORD *)malloc(640 * 480 * sizeof(DWORD));
-        g_dd4.lpVtbl = &g_dd4_vtbl;
-        g_dd1.lpVtbl = &g_dd1_vtbl;
-        g_initialized = TRUE;
-    }
-
-    g_dd_refcount++;
-    if (guid_eq(iid, &MY_IID_IDirectDraw4)) {
-        *ddraw = &g_dd4;
-    } else {
-        *ddraw = &g_dd1;
-    }
-    return DD_OK;
+HRESULT WINAPI DirectDrawEnumerateW(LPDDENUMCALLBACKW cb, void *ctx)
+{
+    if (!load_real_ddraw()) return DDERR_GENERIC;
+    return g_real_DirectDrawEnumerateW(cb, ctx);
 }
 
-HRESULT WINAPI DirectDrawCreateClipper(DWORD flags, LPDIRECTDRAWCLIPPER *clipper, IUnknown *outer) {
-    (void)flags; (void)outer;
-    rdd_log("DirectDrawCreateClipper called (not supported)");
-    *clipper = NULL;
-    return DDERR_UNSUPPORTED;
+HRESULT WINAPI DirectDrawEnumerateExW(LPDDENUMCALLBACKEXW cb, void *ctx, DWORD flags)
+{
+    if (!load_real_ddraw()) return DDERR_GENERIC;
+    return g_real_DirectDrawEnumerateExW(cb, ctx, flags);
 }
 
-HRESULT WINAPI DirectDrawEnumerateA(LPDDENUMCALLBACKA cb, void *ctx) {
-    rdd_log("DirectDrawEnumerateA called");
-    if (cb) cb(NULL, "Revenant DDraw", "display", ctx);
-    return DD_OK;
-}
-
-HRESULT WINAPI DirectDrawEnumerateExA(LPDDENUMCALLBACKEXA cb, void *ctx, DWORD flags) {
-    (void)flags;
-    rdd_log("DirectDrawEnumerateExA called");
-    if (cb) cb(NULL, "Revenant DDraw", "display", ctx, NULL);
-    return DD_OK;
-}
-
-HRESULT WINAPI DirectDrawEnumerateW(LPDDENUMCALLBACKW cb, void *ctx) {
-    rdd_log("DirectDrawEnumerateW called");
-    if (cb) cb(NULL, L"Revenant DDraw", L"display", ctx);
-    return DD_OK;
-}
-
-HRESULT WINAPI DirectDrawEnumerateExW(LPDDENUMCALLBACKEXW cb, void *ctx, DWORD flags) {
-    (void)flags;
-    rdd_log("DirectDrawEnumerateExW called");
-    if (cb) cb(NULL, L"Revenant DDraw", L"display", ctx, NULL);
-    return DD_OK;
-}
-
-/* COM class factory stubs (required by some DLL loaders) */
 HRESULT WINAPI DllCanUnloadNow(void) { return S_FALSE; }
-HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **out) {
+HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **out)
+{
     (void)rclsid; (void)riid;
-    *out = NULL;
+    if (out) *out = NULL;
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
@@ -2168,16 +1405,40 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **out) {
  * DllMain
  * ================================================================ */
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
-    (void)hinstDLL; (void)lpReserved;
-    if (fdwReason == DLL_PROCESS_ATTACH) {
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
+{
+    (void)reserved;
+
+    if (reason == DLL_PROCESS_ATTACH) {
+        g_self_module = hinstDLL;
         DisableThreadLibraryCalls(hinstDLL);
-        rdd_log("=== revenant_ddraw loaded ===");
-    } else if (fdwReason == DLL_PROCESS_DETACH) {
+        InitializeCriticalSection(&g_proxy_lock);
+        g_proxy_lock_ready = TRUE;
+        init_lut();
+        init_bmi();
+        ensure_present_state();
+        rdd_log("=== revenant_ddraw proxy loaded ===");
+    } else if (reason == DLL_PROCESS_DETACH) {
         restore_window();
-        rdd_log("=== revenant_ddraw unloaded ===");
-        if (g_logfile) { fclose(g_logfile); g_logfile = NULL; }
-        if (g_present_buf) { free(g_present_buf); g_present_buf = NULL; }
+        rdd_log("=== revenant_ddraw proxy unloaded ===");
+        if (g_real_ddraw) {
+            FreeLibrary(g_real_ddraw);
+            g_real_ddraw = NULL;
+        }
+        if (g_present_buf) {
+            free(g_present_buf);
+            g_present_buf = NULL;
+        }
+        if (g_logfile) {
+            fclose(g_logfile);
+            g_logfile = NULL;
+        }
+        if (g_proxy_lock_ready) {
+            DeleteCriticalSection(&g_proxy_lock);
+            g_proxy_lock_ready = FALSE;
+        }
+        g_self_module = NULL;
     }
+
     return TRUE;
 }
