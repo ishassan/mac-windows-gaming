@@ -33,7 +33,7 @@ The custom `ddraw.dll` (source: `patch/revenant_ddraw.c`) is a complete DirectDr
 - **Presents frames via StretchDIBits.** On every `Blt` call that targets the primary surface, the DLL converts the RGB565 pixel data to RGB8888 using a precomputed lookup table, then calls `StretchDIBits` to scale the 640x480 image to fill the game window. The HALFTONE stretch mode provides smooth scaling.
 - **Provides minimal D3D stubs.** The game queries `IDirectDraw4` for `IDirect3D3`, then creates a `IDirect3DDevice3` and `IDirect3DViewport3`. These are all stubbed to return success so the game passes its initialization checks without actually using hardware 3D.
 - **Implements GetDC/ReleaseDC.** The game uses `GetDC` on surfaces to draw text via GDI (for menus and UI). The custom implementation creates a temporary 32-bit DIB section, copies the RGB565 surface data into it, hands the DC to the game, then copies the modified pixels back on `ReleaseDC`.
-- **Implements IDirect3DTexture2.** Surfaces can be queried for the texture interface. The implementation provides `GetHandle` (returns a handle based on the surface pointer) and `Load` (copies pixel data between texture surfaces).
+- **Implements IDirect3DTexture2.** Surfaces created with `DDSCAPS_TEXTURE` can be queried for the texture interface. The implementation provides `GetHandle` (returns a handle based on the surface pointer) and `Load` (copies pixel data between texture surfaces).
 
 ## Step 1: Install via Porting Kit
 
@@ -93,9 +93,17 @@ Launch the game from Porting Kit or double-click `Revenant.app` in `~/Applicatio
 
 The game renders at 640x480 and the custom DLL scales the output to fill the entire screen. The intro cinematics and main menu will display in fullscreen.
 
+## Current Status
+
+- **Gameplay now starts.** The previous startup failure when beginning a New Game is fixed. The custom DLL now preserves `DDSCAPS_TEXTURE` / `DDSCAPS_ALLOCONLOAD` on texture surfaces, and the game reaches in-game rendering instead of failing during texture setup.
+- **Fullscreen rendering works through gameplay.** Intro cinematics, the main menu, and live gameplay all render through the replacement `ddraw.dll`.
+- **Texture uploads now complete.** `revenant_ddraw.log` shows texture surfaces being created with their requested caps intact and `IDirect3DTexture2::Load` copying texture data successfully.
+
 ## Known Limitations
 
-- **Texture loading fails when starting New Game.** The game's 3D renderer requires a more complete D3D device implementation than what the current stubs provide. The game's menu and cinematics work, but starting actual gameplay fails with "Unable to load tormar texture". This happens because the D3D device stubs do not fully implement the texture management pipeline the game's software renderer expects.
+- **Pink / magenta rendering remains in gameplay.** Some parts of the HUD, menus, or dialog overlays render as solid pink or magenta blocks. This likely means there is still a remaining issue in the custom surface presentation path for alpha-bearing texture formats such as ARGB4444 / ARGB1555, or in transparency / color-key handling after texture upload.
+- **Escape -> Save Game does not open the save dialog.** The in-game menu appears, but choosing Save Game does not display the save-game dialog window.
+- **Escape -> Exit Program freezes the game.** Choosing Exit Program from the in-game menu does not shut the process down cleanly; the game becomes unresponsive instead.
 - **Aspect ratio.** The game's 4:3 content is stretched to fill the screen. If the display is 16:10 or wider, there will be slight horizontal stretching.
 - **No Flip-based rendering.** The game uses `Blt` (not `Flip`) to present frames. The fullscreen scaling triggers on every `Blt` to the primary surface.
 
@@ -144,16 +152,16 @@ When the game calls `SetDisplayMode(640, 480, 16)`, the custom DLL does not actu
 The game queries `IDirectDraw4` for `IDirect3D3` during initialization. From there, it creates a `IDirect3DDevice3` (a HAL or RGB software device) and a `IDirect3DViewport3`. These interfaces are stubbed:
 
 - **IDirect3D3** (13 methods): `QueryInterface`, `AddRef`, `Release`, `EnumDevices` (calls the callback with a fake "HAL" device), `CreateDevice`, `CreateViewport`, and others returning `DD_OK` or `D3D_OK`.
-- **IDirect3DDevice3** (50 methods): Most methods return `D3D_OK` as no-ops. `GetDirect3D` returns the D3D3 object. `SetRenderState` and `SetTextureStageState` are logged but otherwise ignored.
+- **IDirect3DDevice3** (50 methods): Most methods still return `D3D_OK` as no-ops. `GetDirect3D` returns the D3D3 object. The implementation now preserves render states, stage-0 texture bindings, and texture-stage state values so the game's texture pipeline sees real texture handles and descriptors instead of plain offscreen surfaces.
 - **IDirect3DViewport3** (20 methods): `SetViewport2` stores viewport parameters. Other methods return `D3D_OK`.
 
 These stubs exist because the game checks for D3D device availability during initialization, even though it ultimately uses its own software renderer for the 3D viewport. Without these stubs, the game fails with "This game requires DirectX 6.0 or higher."
 
 ### IDirect3DTexture2 and Texture Handle Management
 
-Surfaces created with `DDSCAPS_TEXTURE` can be queried for the `IDirect3DTexture2` interface. The implementation:
+Surfaces created with `DDSCAPS_TEXTURE` preserve their requested DirectDraw caps and can be queried for the `IDirect3DTexture2` interface. The implementation:
 
 - **GetHandle:** Returns a handle derived from the surface pointer. The game uses these handles in `SetRenderState(D3DRENDERSTATE_TEXTUREHANDLE, ...)` calls.
 - **Load:** Copies pixel data from one texture surface to another (same dimensions required). This is used by the game to upload texture data to "device" textures.
 
-A pool of up to 64 texture objects is maintained (`g_tex_pool`), mapping surfaces to their texture interface wrappers.
+A pool of up to 256 texture objects is maintained (`g_tex_pool`), mapping surfaces to their texture interface wrappers.

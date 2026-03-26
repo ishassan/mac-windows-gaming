@@ -79,6 +79,10 @@ static const GUID MY_IID_IDirectDrawSurface3 =
 static const GUID MY_IID_IDirectDrawSurface4 =
     {0x0B2B8630,0xAD35,0x11D0,{0x8E,0xA6,0x00,0x60,0x97,0x97,0xEA,0x5B}};
 
+#ifndef D3DRENDERSTATE_TEXTUREHANDLE
+#define D3DRENDERSTATE_TEXTUREHANDLE 1
+#endif
+
 /* ================================================================
  * Forward declarations
  * ================================================================ */
@@ -89,6 +93,7 @@ typedef struct DD4Vtbl DD4Vtbl;
 typedef struct DD1Vtbl DD1Vtbl;
 typedef struct DD4Obj DD4Obj;
 typedef struct DD1Obj DD1Obj;
+typedef struct D3DTexObj D3DTexObj;
 
 /* ================================================================
  * Types
@@ -199,6 +204,10 @@ static void fill_pixelformat_rgb565(DDPIXELFORMAT *pf) {
     pf->dwBBitMask = 0x001F;
 }
 
+static int surface_is_texture(const RDDSurface *surf) {
+    return surf && (surf->caps & DDSCAPS_TEXTURE);
+}
+
 static void fill_surface_desc(RDDSurface *surf, DDSURFACEDESC2 *desc) {
     memset(desc, 0, sizeof(*desc));
     desc->dwSize = sizeof(DDSURFACEDESC2);
@@ -217,7 +226,7 @@ static void fill_surface_desc(RDDSurface *surf, DDSURFACEDESC2 *desc) {
 /* Forward-declared vtable instance */
 static RDDSurfaceVtbl g_surf_vtbl;
 
-static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDPIXELFORMAT *pf) {
+static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDPIXELFORMAT *pf, DWORD caps) {
     RDDSurface *s = (RDDSurface *)calloc(1, sizeof(RDDSurface));
     if (!s) return NULL;
     s->lpVtbl = &g_surf_vtbl;
@@ -228,25 +237,33 @@ static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDP
     s->bpp = bpp;
     s->pitch = (LONG)(((w * bpp + 63) & ~63) >> 3);
     s->pixels = (BYTE *)calloc(1, (size_t)(s->pitch * h));
+    if (!s->pixels) {
+        free(s);
+        return NULL;
+    }
     if (pf) {
         s->pixfmt = *pf;
     } else {
         fill_pixelformat_rgb565(&s->pixfmt);
     }
 
-    switch (type) {
-    case SURF_PRIMARY:
-        s->caps = DDSCAPS_PRIMARYSURFACE | DDSCAPS_FLIP | DDSCAPS_COMPLEX | DDSCAPS_VISIBLE;
-        break;
-    case SURF_BACKBUFFER:
-        s->caps = DDSCAPS_BACKBUFFER | DDSCAPS_FLIP | DDSCAPS_COMPLEX;
-        break;
-    case SURF_OFFSCREEN:
-        s->caps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY;
-        break;
+    if (caps) {
+        s->caps = caps;
+    } else {
+        switch (type) {
+        case SURF_PRIMARY:
+            s->caps = DDSCAPS_PRIMARYSURFACE | DDSCAPS_FLIP | DDSCAPS_COMPLEX | DDSCAPS_VISIBLE;
+            break;
+        case SURF_BACKBUFFER:
+            s->caps = DDSCAPS_BACKBUFFER | DDSCAPS_FLIP | DDSCAPS_COMPLEX;
+            break;
+        case SURF_OFFSCREEN:
+            s->caps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY;
+            break;
+        }
     }
 
-    rdd_log("alloc_surface: %dx%dx%d type=%d pitch=%d", w, h, bpp, type, s->pitch);
+    rdd_log("alloc_surface: %dx%dx%d type=%d pitch=%d caps=0x%lx", w, h, bpp, type, s->pitch, s->caps);
     return s;
 }
 
@@ -259,10 +276,18 @@ static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDP
  * Returned when surfaces are QI'd for texture interface.
  * ================================================================ */
 
-typedef struct D3DTexObj D3DTexObj;
 struct D3DTexObj { void **lpVtbl; RDDSurface *surf; };
 
-static HRESULT WINAPI D3DTex_QI(D3DTexObj *s, REFIID r, void **o) { (void)s; (void)r; *o = NULL; return E_NOINTERFACE; }
+static HRESULT WINAPI D3DTex_QI(D3DTexObj *s, REFIID r, void **o) {
+    if (guid_eq(r, &MY_IID_IDirect3DTexture) ||
+        guid_eq(r, &MY_IID_IDirect3DTexture2) ||
+        guid_eq(r, &MY_IID_IUnknown)) {
+        *o = s;
+        return S_OK;
+    }
+    *o = NULL;
+    return E_NOINTERFACE;
+}
 static ULONG WINAPI D3DTex_AddRef(D3DTexObj *s) { (void)s; return 2; }
 static ULONG WINAPI D3DTex_Release(D3DTexObj *s) { (void)s; return 1; }
 static HRESULT WINAPI D3DTex_GetHandle(D3DTexObj *s, void *dev, void *handle) {
@@ -273,19 +298,31 @@ static HRESULT WINAPI D3DTex_GetHandle(D3DTexObj *s, void *dev, void *handle) {
 }
 static HRESULT WINAPI D3DTex_PaletteChanged(D3DTexObj *s, void *a, void *b) { rdd_log("D3DTex_PaletteChanged"); (void)s; (void)a; (void)b; return DD_OK; }
 static HRESULT WINAPI D3DTex_Load(D3DTexObj *s, void *src_tex) {
+    D3DTexObj *src = (D3DTexObj *)src_tex;
     rdd_log("D3DTex_Load: dst=%p src=%p", (void*)s->surf, src_tex);
-    /* Copy pixel data from source texture surface to destination */
-    if (src_tex) {
-        D3DTexObj *src = (D3DTexObj *)src_tex;
-        if (src->surf && s->surf &&
-            src->surf->width == s->surf->width &&
-            src->surf->height == s->surf->height &&
-            src->surf->pitch == s->surf->pitch) {
-            memcpy(s->surf->pixels, src->surf->pixels,
-                   (size_t)(s->surf->pitch * s->surf->height));
-            rdd_log("D3DTex_Load: copied %lux%lu pixels", s->surf->width, s->surf->height);
-        }
+
+    if (!s || !surface_is_texture(s->surf) || !src || !surface_is_texture(src->surf)) {
+        rdd_log("D3DTex_Load: rejecting non-texture src/dst");
+        return DDERR_INVALIDPARAMS;
     }
+
+    if (!s->surf->pixels || !src->surf->pixels) {
+        rdd_log("D3DTex_Load: rejecting NULL pixel buffer");
+        return E_FAIL;
+    }
+
+    if (src->surf->width != s->surf->width ||
+        src->surf->height != s->surf->height ||
+        src->surf->pitch != s->surf->pitch) {
+        rdd_log("D3DTex_Load: size mismatch src=%lux%lu pitch=%ld dst=%lux%lu pitch=%ld",
+                src->surf->width, src->surf->height, src->surf->pitch,
+                s->surf->width, s->surf->height, s->surf->pitch);
+        return DDERR_INVALIDPARAMS;
+    }
+
+    memcpy(s->surf->pixels, src->surf->pixels,
+           (size_t)(s->surf->pitch * s->surf->height));
+    rdd_log("D3DTex_Load: copied %lux%lu pixels", s->surf->width, s->surf->height);
     return DD_OK;
 }
 
@@ -297,22 +334,32 @@ static void *g_d3dtex_vtbl[6] = {
 };
 
 /* Pool of texture objects (surfaces can be QI'd for texture) */
-#define MAX_TEX_OBJS 64
+#define MAX_TEX_OBJS 256
 static D3DTexObj g_tex_pool[MAX_TEX_OBJS];
 static int g_tex_count = 0;
 
 static D3DTexObj *get_tex_for_surface(RDDSurface *surf) {
+    int first_free = -1;
     int i;
+
     for (i = 0; i < g_tex_count; i++)
         if (g_tex_pool[i].surf == surf) return &g_tex_pool[i];
-    if (g_tex_count < MAX_TEX_OBJS) {
-        D3DTexObj *t = &g_tex_pool[g_tex_count++];
+    for (i = 0; i < g_tex_count; i++) {
+        if (!g_tex_pool[i].surf) {
+            first_free = i;
+            break;
+        }
+    }
+    if (first_free >= 0 || g_tex_count < MAX_TEX_OBJS) {
+        D3DTexObj *t = (first_free >= 0) ? &g_tex_pool[first_free] : &g_tex_pool[g_tex_count++];
         t->lpVtbl = g_d3dtex_vtbl;
         t->surf = surf;
         return t;
     }
     return NULL;
 }
+
+static void clear_texture_state_for_surface(RDDSurface *surf);
 
 /* --- IUnknown --- */
 
@@ -328,8 +375,19 @@ static HRESULT WINAPI Surf_QueryInterface(RDDSurface *self, REFIID riid, void **
     }
     if (guid_eq(riid, &MY_IID_IDirect3DTexture) ||
         guid_eq(riid, &MY_IID_IDirect3DTexture2)) {
-        D3DTexObj *tex = get_tex_for_surface(self);
-        if (tex) { *out = tex; return S_OK; }
+        if (!surface_is_texture(self)) {
+            *out = NULL;
+            rdd_log("Surf_QI: texture requested on non-texture surface caps=0x%lx", self->caps);
+            return E_NOINTERFACE;
+        }
+        {
+            D3DTexObj *tex = get_tex_for_surface(self);
+            if (tex) {
+                *out = tex;
+                rdd_log("Surf_QI: returning texture iface caps=0x%lx", self->caps);
+                return S_OK;
+            }
+        }
     }
     *out = NULL;
     rdd_log("Surf_QI: unknown {%08lx...}", (unsigned long)riid->Data1);
@@ -341,9 +399,15 @@ static ULONG WINAPI Surf_AddRef(RDDSurface *self) {
 }
 
 static ULONG WINAPI Surf_Release(RDDSurface *self) {
+    int i;
     ULONG ref = --self->refcount;
     if (ref == 0) {
         rdd_log("Surf_Release: freeing surface type=%d", self->type);
+        clear_texture_state_for_surface(self);
+        for (i = 0; i < g_tex_count; i++) {
+            if (g_tex_pool[i].surf == self)
+                g_tex_pool[i].surf = NULL;
+        }
         if (self->pixels) free(self->pixels);
         if (self->back_buffer) {
             /* Also free the back buffer if we own it */
@@ -821,13 +885,50 @@ static ULONG WINAPI D3D_Release(D3DObj *self) { (void)self; if (g_dd_refcount > 
  * ================================================================ */
 
 typedef struct D3DDevObj D3DDevObj;
-struct D3DDevObj { void **lpVtbl; };
+#define MAX_D3D_RENDER_STATES 256
+#define MAX_D3D_TEXTURE_STAGES 8
+#define MAX_D3D_STAGE_STATES 256
+
+struct D3DDevObj {
+    void **lpVtbl;
+    DWORD render_states[MAX_D3D_RENDER_STATES];
+    D3DTexObj *bound_textures[MAX_D3D_TEXTURE_STAGES];
+    DWORD texture_stage_states[MAX_D3D_TEXTURE_STAGES][MAX_D3D_STAGE_STATES];
+};
+static D3DDevObj g_d3ddev;
 
 /* Forward declarations for D3D objects used by device stubs */
 static D3DObj g_d3d;
 typedef struct D3DVPObj D3DVPObj;
 struct D3DVPObj { void **lpVtbl; };
 static D3DVPObj g_d3dvp;
+
+static D3DTexObj *find_tex_by_handle(DWORD handle) {
+    int i;
+    for (i = 0; i < g_tex_count; i++) {
+        if (g_tex_pool[i].surf && (DWORD)(void *)g_tex_pool[i].surf == handle)
+            return &g_tex_pool[i];
+    }
+    return NULL;
+}
+
+static D3DTexObj *validate_texture_iface(void *tex_raw) {
+    D3DTexObj *tex = (D3DTexObj *)tex_raw;
+    if (!tex || !surface_is_texture(tex->surf))
+        return NULL;
+    return tex;
+}
+
+static void clear_texture_state_for_surface(RDDSurface *surf) {
+    DWORD handle = (DWORD)(void *)surf;
+    DWORD stage;
+    for (stage = 0; stage < MAX_D3D_TEXTURE_STAGES; stage++) {
+        if (g_d3ddev.bound_textures[stage] && g_d3ddev.bound_textures[stage]->surf == surf)
+            g_d3ddev.bound_textures[stage] = NULL;
+    }
+    if (g_d3ddev.render_states[D3DRENDERSTATE_TEXTUREHANDLE] == handle)
+        g_d3ddev.render_states[D3DRENDERSTATE_TEXTUREHANDLE] = 0;
+}
 
 /* Generic stubs by parameter count (stdcall, all params are 4 bytes on x86) */
 static HRESULT WINAPI d3dd_stub1(void *s) { (void)s; return DD_OK; }
@@ -927,8 +1028,30 @@ static HRESULT WINAPI D3DDev_BeginIndexed(void *s, void *a, void *b, void *c, vo
 static HRESULT WINAPI D3DDev_Vertex(void *s, void *a) { (void)s; (void)a; return DD_OK; }
 static HRESULT WINAPI D3DDev_Index(void *s, void *a) { (void)s; (void)a; return DD_OK; }
 static HRESULT WINAPI D3DDev_End(void *s, void *a) { (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetRenderState(void *s, void *a, void *b) { (void)s; (void)a; if (b) *(DWORD*)b = 0; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetRenderState(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
+static HRESULT WINAPI D3DDev_GetRenderState(void *s, void *a, void *b) {
+    D3DDevObj *dev = (D3DDevObj *)s;
+    DWORD state = (DWORD)(ULONG_PTR)a;
+    DWORD value = 0;
+    if (state < MAX_D3D_RENDER_STATES)
+        value = dev->render_states[state];
+    if (b) *(DWORD*)b = value;
+    if (state == D3DRENDERSTATE_TEXTUREHANDLE)
+        rdd_log("D3DDev_GetRenderState: TEXTUREHANDLE=0x%lx", value);
+    return DD_OK;
+}
+static HRESULT WINAPI D3DDev_SetRenderState(void *s, void *a, void *b) {
+    D3DDevObj *dev = (D3DDevObj *)s;
+    DWORD state = (DWORD)(ULONG_PTR)a;
+    DWORD value = (DWORD)(ULONG_PTR)b;
+    if (state < MAX_D3D_RENDER_STATES)
+        dev->render_states[state] = value;
+    if (state == D3DRENDERSTATE_TEXTUREHANDLE) {
+        dev->bound_textures[0] = value ? find_tex_by_handle(value) : NULL;
+        rdd_log("D3DDev_SetRenderState: TEXTUREHANDLE=0x%lx surf=%p", value,
+                dev->bound_textures[0] ? (void *)dev->bound_textures[0]->surf : NULL);
+    }
+    return DD_OK;
+}
 static HRESULT WINAPI D3DDev_GetLightState(void *s, void *a, void *b) { (void)s; (void)a; if (b) *(DWORD*)b = 0; return DD_OK; }
 static HRESULT WINAPI D3DDev_SetLightState(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
 static HRESULT WINAPI D3DDev_SetTransform(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
@@ -952,10 +1075,65 @@ static HRESULT WINAPI D3DDev_DrawIndexedPrimitiveStrided(void *s, void *a, void 
 static HRESULT WINAPI D3DDev_DrawPrimitiveVB(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
 static HRESULT WINAPI D3DDev_DrawIndexedPrimitiveVB(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
 static HRESULT WINAPI D3DDev_ComputeSphereVisibility(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetTexture(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetTexture(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetTextureStageState(void *s, void *a, void *b, void *c) { (void)s; (void)a; (void)b; if (c) *(DWORD*)c = 0; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetTextureStageState(void *s, void *a, void *b, void *c) { (void)s; (void)a; (void)b; (void)c; return DD_OK; }
+static HRESULT WINAPI D3DDev_GetTexture(void *s, void *a, void *b) {
+    D3DDevObj *dev = (D3DDevObj *)s;
+    DWORD stage = (DWORD)(ULONG_PTR)a;
+    D3DTexObj *tex = NULL;
+    if (!b) return DDERR_INVALIDPARAMS;
+    if (stage < MAX_D3D_TEXTURE_STAGES)
+        tex = dev->bound_textures[stage];
+    if (!tex && stage == 0 && dev->render_states[D3DRENDERSTATE_TEXTUREHANDLE])
+        tex = find_tex_by_handle(dev->render_states[D3DRENDERSTATE_TEXTUREHANDLE]);
+    *(void **)b = tex;
+    if (tex) {
+        D3DTex_AddRef(tex);
+        rdd_log("D3DDev_GetTexture: stage=%lu surf=%p", stage, (void *)tex->surf);
+    }
+    return DD_OK;
+}
+static HRESULT WINAPI D3DDev_SetTexture(void *s, void *a, void *b) {
+    D3DDevObj *dev = (D3DDevObj *)s;
+    DWORD stage = (DWORD)(ULONG_PTR)a;
+    D3DTexObj *tex = NULL;
+    if (stage >= MAX_D3D_TEXTURE_STAGES)
+        return DDERR_INVALIDPARAMS;
+    if (b) {
+        tex = validate_texture_iface(b);
+        if (!tex) {
+            rdd_log("D3DDev_SetTexture: rejecting invalid texture iface stage=%lu ptr=%p", stage, b);
+            return DDERR_INVALIDPARAMS;
+        }
+    }
+    dev->bound_textures[stage] = tex;
+    if (stage == 0) {
+        dev->render_states[D3DRENDERSTATE_TEXTUREHANDLE] = tex ? (DWORD)(void *)tex->surf : 0;
+    }
+    rdd_log("D3DDev_SetTexture: stage=%lu surf=%p handle=0x%lx", stage,
+            tex ? (void *)tex->surf : NULL,
+            (unsigned long)(stage == 0 ? dev->render_states[D3DRENDERSTATE_TEXTUREHANDLE] : 0));
+    return DD_OK;
+}
+static HRESULT WINAPI D3DDev_GetTextureStageState(void *s, void *a, void *b, void *c) {
+    D3DDevObj *dev = (D3DDevObj *)s;
+    DWORD stage = (DWORD)(ULONG_PTR)a;
+    DWORD state = (DWORD)(ULONG_PTR)b;
+    DWORD value = 0;
+    if (stage < MAX_D3D_TEXTURE_STAGES && state < MAX_D3D_STAGE_STATES)
+        value = dev->texture_stage_states[stage][state];
+    if (c) *(DWORD*)c = value;
+    return DD_OK;
+}
+static HRESULT WINAPI D3DDev_SetTextureStageState(void *s, void *a, void *b, void *c) {
+    D3DDevObj *dev = (D3DDevObj *)s;
+    DWORD stage = (DWORD)(ULONG_PTR)a;
+    DWORD state = (DWORD)(ULONG_PTR)b;
+    DWORD value = (DWORD)(ULONG_PTR)c;
+    if (stage < MAX_D3D_TEXTURE_STAGES && state < MAX_D3D_STAGE_STATES)
+        dev->texture_stage_states[stage][state] = value;
+    if (stage == 0)
+        rdd_log("D3DDev_SetTextureStageState: stage=%lu state=%lu value=0x%lx", stage, state, value);
+    return DD_OK;
+}
 static HRESULT WINAPI D3DDev_ValidateDevice(void *s, void *a) { rdd_log("D3DDev[41] ValidateDevice"); (void)s; (void)a; return DD_OK; }
 
 static void *g_d3ddev_vtbl[42] = {
@@ -1003,7 +1181,7 @@ static void *g_d3ddev_vtbl[42] = {
     D3DDev_ValidateDevice          /* 41 */
 };
 
-static D3DDevObj g_d3ddev = { g_d3ddev_vtbl };
+static D3DDevObj g_d3ddev = { g_d3ddev_vtbl, {0}, {0}, {{0}} };
 
 /* ================================================================
  * Minimal IDirect3DViewport3 stub (21 methods)
@@ -1448,8 +1626,10 @@ static HRESULT WINAPI DD4_CreateSurface(DD4Obj *self, LPDDSURFACEDESC2 desc,
             desc->dwFlags, caps, desc->dwWidth, desc->dwHeight, desc->dwBackBufferCount);
 
     if (caps & DDSCAPS_PRIMARYSURFACE) {
-        RDDSurface *primary = alloc_surface(SURF_PRIMARY, 640, 480, 16, NULL);
-        RDDSurface *backbuf = alloc_surface(SURF_BACKBUFFER, 640, 480, 16, NULL);
+        RDDSurface *primary = alloc_surface(SURF_PRIMARY, 640, 480, 16, NULL,
+                                            DDSCAPS_PRIMARYSURFACE | DDSCAPS_FLIP | DDSCAPS_COMPLEX | DDSCAPS_VISIBLE);
+        RDDSurface *backbuf = alloc_surface(SURF_BACKBUFFER, 640, 480, 16, NULL,
+                                            DDSCAPS_BACKBUFFER | DDSCAPS_FLIP | DDSCAPS_COMPLEX);
         if (!primary || !backbuf) {
             if (primary) { free(primary->pixels); free(primary); }
             if (backbuf) { free(backbuf->pixels); free(backbuf); }
@@ -1486,10 +1666,10 @@ static HRESULT WINAPI DD4_CreateSurface(DD4Obj *self, LPDDSURFACEDESC2 desc,
         }
         {
         DDPIXELFORMAT *fmt = (desc->dwFlags & DDSD_PIXELFORMAT) ? &desc->ddpfPixelFormat : NULL;
-        *out = alloc_surface(SURF_OFFSCREEN, w, h, bpp, fmt);
+        *out = alloc_surface(SURF_OFFSCREEN, w, h, bpp, fmt, caps);
         }
         if (!*out) return DDERR_OUTOFMEMORY;
-        rdd_log("DD4_CreateSurface: created %s %lux%lux%lu", kind, w, h, bpp);
+        rdd_log("DD4_CreateSurface: created %s %lux%lux%lu reported_caps=0x%lx", kind, w, h, bpp, (*out)->caps);
         return DD_OK;
     }
 
