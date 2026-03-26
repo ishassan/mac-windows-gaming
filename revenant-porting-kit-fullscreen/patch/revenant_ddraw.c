@@ -13,6 +13,7 @@
 #include <windows.h>
 #include <ddraw.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -72,6 +73,8 @@ static const GUID MY_IID_IDirect3DTexture2 =
     {0x93281502,0x8CF8,0x11D0,{0x89,0xAB,0x00,0xA0,0xC9,0x05,0x41,0x29}};
 static const GUID MY_IID_IDirectDrawSurface =
     {0x6C14DB81,0xA733,0x11CE,{0xA5,0x21,0x00,0x20,0xAF,0x0B,0xE5,0x60}};
+static const GUID MY_IID_IDirectDrawClipper =
+    {0x6C14DB85,0xA733,0x11CE,{0xA5,0x21,0x00,0x20,0xAF,0x0B,0xE5,0x60}};
 static const GUID MY_IID_IDirectDrawSurface2 =
     {0x57805885,0x6EEC,0x11CF,{0x94,0x41,0xA8,0x23,0x03,0xC1,0x0E,0x27}};
 static const GUID MY_IID_IDirectDrawSurface3 =
@@ -94,12 +97,29 @@ typedef struct DD1Vtbl DD1Vtbl;
 typedef struct DD4Obj DD4Obj;
 typedef struct DD1Obj DD1Obj;
 typedef struct D3DTexObj D3DTexObj;
+typedef struct RDDClipper RDDClipper;
+typedef struct RDDClipperVtbl RDDClipperVtbl;
+
+static ULONG WINAPI Clip_AddRef(RDDClipper *s);
+static ULONG WINAPI Clip_Release(RDDClipper *s);
 
 /* ================================================================
  * Types
  * ================================================================ */
 
 typedef enum { SURF_PRIMARY, SURF_BACKBUFFER, SURF_OFFSCREEN } SurfType;
+typedef enum {
+    SURF_FMT_UNKNOWN = 0,
+    SURF_FMT_RGB565,
+    SURF_FMT_RGB555,
+    SURF_FMT_ARGB1555,
+    SURF_FMT_ARGB4444
+} SurfaceFormatKind;
+
+typedef struct SurfaceColorKey {
+    BOOL valid;
+    DDCOLORKEY value;
+} SurfaceColorKey;
 
 struct RDDSurface {
     RDDSurfaceVtbl *lpVtbl;
@@ -110,8 +130,16 @@ struct RDDSurface {
     BYTE *pixels;
     BOOL locked;
     RDDSurface *back_buffer;    /* primary -> back */
+    RDDSurface *owner_primary;  /* backbuffer -> primary */
     DWORD caps;
     DDPIXELFORMAT pixfmt;  /* actual pixel format from CreateSurface */
+    SurfaceFormatKind fmt_kind;
+    DWORD creator_version;
+    SurfaceColorKey src_blt_ck;
+    SurfaceColorKey dst_blt_ck;
+    SurfaceColorKey src_overlay_ck;
+    SurfaceColorKey dst_overlay_ck;
+    RDDClipper *clipper;
     /* GetDC state */
     HDC hdc_mem;
     HBITMAP hdc_bmp;
@@ -134,6 +162,13 @@ static ULONG g_dd_refcount = 0;
 static DD4Obj g_dd4;
 static DD1Obj g_dd1;
 static BOOL g_initialized = FALSE;
+static RECT g_window_rect;
+static DWORD g_window_style = 0;
+static DWORD g_window_ex_style = 0;
+static BOOL g_window_state_saved = FALSE;
+
+static void save_window_state(void);
+static void restore_window_state(void);
 
 /* ================================================================
  * Presentation: RGB565 LUT + StretchDIBits
@@ -162,6 +197,161 @@ static void init_bmi(void) {
     g_bmi.bmiHeader.biCompression = BI_RGB;
 }
 
+typedef struct PixelRGBA {
+    BYTE r;
+    BYTE g;
+    BYTE b;
+    BYTE a;
+} PixelRGBA;
+
+static SurfaceFormatKind detect_surface_format(const DDPIXELFORMAT *pf) {
+    if (!pf || pf->dwRGBBitCount != 16)
+        return SURF_FMT_UNKNOWN;
+
+    if ((pf->dwFlags & DDPF_ALPHAPIXELS) &&
+        pf->dwRGBAlphaBitMask == 0x8000 &&
+        pf->dwRBitMask == 0x7C00 &&
+        pf->dwGBitMask == 0x03E0 &&
+        pf->dwBBitMask == 0x001F)
+        return SURF_FMT_ARGB1555;
+
+    if ((pf->dwFlags & DDPF_ALPHAPIXELS) &&
+        pf->dwRGBAlphaBitMask == 0xF000 &&
+        pf->dwRBitMask == 0x0F00 &&
+        pf->dwGBitMask == 0x00F0 &&
+        pf->dwBBitMask == 0x000F)
+        return SURF_FMT_ARGB4444;
+
+    if (pf->dwRBitMask == 0xF800 &&
+        pf->dwGBitMask == 0x07E0 &&
+        pf->dwBBitMask == 0x001F)
+        return SURF_FMT_RGB565;
+
+    if (pf->dwRBitMask == 0x7C00 &&
+        pf->dwGBitMask == 0x03E0 &&
+        pf->dwBBitMask == 0x001F)
+        return SURF_FMT_RGB555;
+
+    return SURF_FMT_UNKNOWN;
+}
+
+static BYTE expand_4_to_8(DWORD v) { return (BYTE)((v << 4) | v); }
+static BYTE expand_5_to_8(DWORD v) { return (BYTE)((v << 3) | (v >> 2)); }
+static BYTE expand_6_to_8(DWORD v) { return (BYTE)((v << 2) | (v >> 4)); }
+
+static PixelRGBA decode_pixel16(SurfaceFormatKind kind, WORD pixel) {
+    PixelRGBA out;
+
+    out.r = 0;
+    out.g = 0;
+    out.b = 0;
+    out.a = 0xFF;
+
+    switch (kind) {
+    case SURF_FMT_RGB565:
+        out.r = expand_5_to_8((pixel >> 11) & 0x1F);
+        out.g = expand_6_to_8((pixel >> 5) & 0x3F);
+        out.b = expand_5_to_8(pixel & 0x1F);
+        break;
+    case SURF_FMT_RGB555:
+        out.r = expand_5_to_8((pixel >> 10) & 0x1F);
+        out.g = expand_5_to_8((pixel >> 5) & 0x1F);
+        out.b = expand_5_to_8(pixel & 0x1F);
+        break;
+    case SURF_FMT_ARGB1555:
+        out.a = (pixel & 0x8000) ? 0xFF : 0x00;
+        out.r = expand_5_to_8((pixel >> 10) & 0x1F);
+        out.g = expand_5_to_8((pixel >> 5) & 0x1F);
+        out.b = expand_5_to_8(pixel & 0x1F);
+        break;
+    case SURF_FMT_ARGB4444:
+        out.a = expand_4_to_8((pixel >> 12) & 0x0F);
+        out.r = expand_4_to_8((pixel >> 8) & 0x0F);
+        out.g = expand_4_to_8((pixel >> 4) & 0x0F);
+        out.b = expand_4_to_8(pixel & 0x0F);
+        break;
+    default:
+        out.r = expand_5_to_8((pixel >> 11) & 0x1F);
+        out.g = expand_6_to_8((pixel >> 5) & 0x3F);
+        out.b = expand_5_to_8(pixel & 0x1F);
+        break;
+    }
+
+    return out;
+}
+
+static WORD encode_pixel16(SurfaceFormatKind kind, PixelRGBA color) {
+    WORD out = 0;
+
+    switch (kind) {
+    case SURF_FMT_RGB565:
+        out = (WORD)((((WORD)(color.r >> 3)) << 11) |
+                     (((WORD)(color.g >> 2)) << 5) |
+                     ((WORD)(color.b >> 3)));
+        break;
+    case SURF_FMT_RGB555:
+        out = (WORD)((((WORD)(color.r >> 3)) << 10) |
+                     (((WORD)(color.g >> 3)) << 5) |
+                     ((WORD)(color.b >> 3)));
+        break;
+    case SURF_FMT_ARGB1555:
+        out = (WORD)((color.a >= 0x80 ? 0x8000 : 0) |
+                     (((WORD)(color.r >> 3)) << 10) |
+                     (((WORD)(color.g >> 3)) << 5) |
+                     ((WORD)(color.b >> 3)));
+        break;
+    case SURF_FMT_ARGB4444:
+        out = (WORD)((((WORD)(color.a >> 4)) << 12) |
+                     (((WORD)(color.r >> 4)) << 8) |
+                     (((WORD)(color.g >> 4)) << 4) |
+                     ((WORD)(color.b >> 4)));
+        break;
+    default:
+        out = (WORD)((((WORD)(color.r >> 3)) << 11) |
+                     (((WORD)(color.g >> 2)) << 5) |
+                     ((WORD)(color.b >> 3)));
+        break;
+    }
+
+    return out;
+}
+
+static BOOL surface_format_has_alpha(SurfaceFormatKind kind) {
+    return kind == SURF_FMT_ARGB1555 || kind == SURF_FMT_ARGB4444;
+}
+
+static BOOL surface_can_convert_16bit(const RDDSurface *surf) {
+    return surf && surf->bpp == 16 && surf->fmt_kind != SURF_FMT_UNKNOWN;
+}
+
+static DWORD pack_dib_color(PixelRGBA color) {
+    return ((DWORD)color.r << 16) | ((DWORD)color.g << 8) | color.b;
+}
+
+static BOOL color_key_matches(WORD pixel, const DDCOLORKEY *key) {
+    DWORD raw = pixel;
+    return raw >= key->dwColorSpaceLowValue && raw <= key->dwColorSpaceHighValue;
+}
+
+static PixelRGBA blend_pixel(PixelRGBA src, PixelRGBA dst) {
+    PixelRGBA out;
+    DWORD src_a = src.a;
+    DWORD inv_a = 255 - src_a;
+
+    if (src_a == 0)
+        return dst;
+    if (src_a >= 255) {
+        src.a = 0xFF;
+        return src;
+    }
+
+    out.r = (BYTE)((src.r * src_a + dst.r * inv_a + 127) / 255);
+    out.g = (BYTE)((src.g * src_a + dst.g * inv_a + 127) / 255);
+    out.b = (BYTE)((src.b * src_a + dst.b * inv_a + 127) / 255);
+    out.a = 0xFF;
+    return out;
+}
+
 static void present_frame(RDDSurface *primary) {
     RECT rc;
     HDC hdc;
@@ -173,8 +363,13 @@ static void present_frame(RDDSurface *primary) {
     /* Convert RGB565 -> BGR8888 */
     src = (WORD *)primary->pixels;
     count = (int)(primary->width * primary->height);
-    for (i = 0; i < count; i++)
-        g_present_buf[i] = g_rgb565_lut[src[i]];
+    if (primary->fmt_kind == SURF_FMT_RGB565) {
+        for (i = 0; i < count; i++)
+            g_present_buf[i] = g_rgb565_lut[src[i]];
+    } else {
+        for (i = 0; i < count; i++)
+            g_present_buf[i] = pack_dib_color(decode_pixel16(primary->fmt_kind, src[i]));
+    }
 
     GetClientRect(g_hwnd, &rc);
     hdc = GetDC(g_hwnd);
@@ -219,6 +414,169 @@ static void fill_surface_desc(RDDSurface *surf, DDSURFACEDESC2 *desc) {
     desc->ddsCaps.dwCaps = surf->caps;
 }
 
+typedef struct BlitOptions {
+    BOOL use_src_colorkey;
+    BOOL use_dst_colorkey;
+    BOOL apply_src_alpha;
+    DDCOLORKEY src_colorkey;
+    DDCOLORKEY dst_colorkey;
+} BlitOptions;
+
+static SurfaceColorKey *surface_pick_colorkey_slot(RDDSurface *surf, DWORD flags) {
+    if (!surf)
+        return NULL;
+    if (flags & DDCKEY_DESTBLT) return &surf->dst_blt_ck;
+    if (flags & DDCKEY_SRCBLT) return &surf->src_blt_ck;
+    if (flags & DDCKEY_DESTOVERLAY) return &surf->dst_overlay_ck;
+    if (flags & DDCKEY_SRCOVERLAY) return &surf->src_overlay_ck;
+    return NULL;
+}
+
+static const SurfaceColorKey *surface_get_colorkey_slot(const RDDSurface *surf, DWORD flags) {
+    return surface_pick_colorkey_slot((RDDSurface *)surf, flags);
+}
+
+static BOOL prepare_copy_rects(const RDDSurface *dst, RECT *dr, const RDDSurface *src, RECT *sr) {
+    LONG w, h;
+
+    if (sr->left < 0) {
+        dr->left -= sr->left;
+        sr->left = 0;
+    }
+    if (sr->top < 0) {
+        dr->top -= sr->top;
+        sr->top = 0;
+    }
+    if (dr->left < 0) {
+        sr->left -= dr->left;
+        dr->left = 0;
+    }
+    if (dr->top < 0) {
+        sr->top -= dr->top;
+        dr->top = 0;
+    }
+
+    if (sr->right > (LONG)src->width) sr->right = (LONG)src->width;
+    if (sr->bottom > (LONG)src->height) sr->bottom = (LONG)src->height;
+    if (dr->right > (LONG)dst->width) dr->right = (LONG)dst->width;
+    if (dr->bottom > (LONG)dst->height) dr->bottom = (LONG)dst->height;
+
+    w = sr->right - sr->left;
+    if (dr->right - dr->left < w) w = dr->right - dr->left;
+    if ((LONG)src->width - sr->left < w) w = (LONG)src->width - sr->left;
+    if ((LONG)dst->width - dr->left < w) w = (LONG)dst->width - dr->left;
+
+    h = sr->bottom - sr->top;
+    if (dr->bottom - dr->top < h) h = dr->bottom - dr->top;
+    if ((LONG)src->height - sr->top < h) h = (LONG)src->height - sr->top;
+    if ((LONG)dst->height - dr->top < h) h = (LONG)dst->height - dr->top;
+
+    if (w <= 0 || h <= 0)
+        return FALSE;
+
+    sr->right = sr->left + w;
+    sr->bottom = sr->top + h;
+    dr->right = dr->left + w;
+    dr->bottom = dr->top + h;
+    return TRUE;
+}
+
+static void raw_copy_rect(RDDSurface *dst, const RECT *dr, RDDSurface *src, const RECT *sr) {
+    LONG y;
+    int dst_bytes_per_pixel = (int)((dst->bpp + 7) / 8);
+    int src_bytes_per_pixel = (int)((src->bpp + 7) / 8);
+    int copy_bytes_per_pixel = dst_bytes_per_pixel;
+    LONG width = sr->right - sr->left;
+
+    if (src_bytes_per_pixel < copy_bytes_per_pixel)
+        copy_bytes_per_pixel = src_bytes_per_pixel;
+
+    for (y = 0; y < sr->bottom - sr->top; y++) {
+        BYTE *dst_row = dst->pixels + (dr->top + y) * dst->pitch + dr->left * dst_bytes_per_pixel;
+        BYTE *src_row = src->pixels + (sr->top + y) * src->pitch + sr->left * src_bytes_per_pixel;
+        memcpy(dst_row, src_row, (size_t)(width * copy_bytes_per_pixel));
+    }
+}
+
+static void convert_rect(RDDSurface *dst, const RECT *dr, RDDSurface *src, const RECT *sr, const BlitOptions *opt) {
+    LONG y, x;
+    LONG width = sr->right - sr->left;
+    LONG height = sr->bottom - sr->top;
+
+    for (y = 0; y < height; y++) {
+        WORD *dst_row = (WORD *)(dst->pixels + (dr->top + y) * dst->pitch) + dr->left;
+        WORD *src_row = (WORD *)(src->pixels + (sr->top + y) * src->pitch) + sr->left;
+
+        for (x = 0; x < width; x++) {
+            WORD src_px = src_row[x];
+            WORD dst_px = dst_row[x];
+            PixelRGBA src_color;
+
+            if (opt && opt->use_src_colorkey && color_key_matches(src_px, &opt->src_colorkey))
+                continue;
+            if (opt && opt->use_dst_colorkey && !color_key_matches(dst_px, &opt->dst_colorkey))
+                continue;
+
+            src_color = decode_pixel16(src->fmt_kind, src_px);
+            if (opt && opt->apply_src_alpha && surface_format_has_alpha(src->fmt_kind)) {
+                if (src_color.a == 0)
+                    continue;
+                if (src_color.a < 255) {
+                    PixelRGBA dst_color = decode_pixel16(dst->fmt_kind, dst_px);
+                    src_color = blend_pixel(src_color, dst_color);
+                }
+            }
+
+            dst_row[x] = encode_pixel16(dst->fmt_kind, src_color);
+        }
+    }
+}
+
+static void blit_surface_rect(RDDSurface *dst, const RECT *dst_rect, RDDSurface *src, const RECT *src_rect, const BlitOptions *opt) {
+    RECT sr, dr;
+    BOOL needs_processing = FALSE;
+
+    sr.left = 0;
+    sr.top = 0;
+    sr.right = (LONG)src->width;
+    sr.bottom = (LONG)src->height;
+    if (src_rect) sr = *src_rect;
+
+    dr.left = 0;
+    dr.top = 0;
+    dr.right = (LONG)dst->width;
+    dr.bottom = (LONG)dst->height;
+    if (dst_rect) dr = *dst_rect;
+
+    if (!prepare_copy_rects(dst, &dr, src, &sr))
+        return;
+
+    if (opt && (opt->use_src_colorkey || opt->use_dst_colorkey))
+        needs_processing = TRUE;
+    if (surface_can_convert_16bit(src) && surface_can_convert_16bit(dst)) {
+        if (src->fmt_kind != dst->fmt_kind ||
+            (opt && opt->apply_src_alpha && surface_format_has_alpha(src->fmt_kind)))
+            needs_processing = TRUE;
+    }
+
+    if (!needs_processing &&
+        src->bpp == dst->bpp &&
+        src->bpp >= 8 &&
+        (!surface_can_convert_16bit(src) || src->fmt_kind == dst->fmt_kind)) {
+        raw_copy_rect(dst, &dr, src, &sr);
+        return;
+    }
+
+    if (surface_can_convert_16bit(src) && surface_can_convert_16bit(dst)) {
+        convert_rect(dst, &dr, src, &sr, opt);
+        return;
+    }
+
+    rdd_log("blit_surface_rect: raw fallback src_bpp=%lu dst_bpp=%lu src_fmt=%d dst_fmt=%d",
+            src->bpp, dst->bpp, src->fmt_kind, dst->fmt_kind);
+    raw_copy_rect(dst, &dr, src, &sr);
+}
+
 /* ================================================================
  * Surface allocation
  * ================================================================ */
@@ -226,7 +584,7 @@ static void fill_surface_desc(RDDSurface *surf, DDSURFACEDESC2 *desc) {
 /* Forward-declared vtable instance */
 static RDDSurfaceVtbl g_surf_vtbl;
 
-static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDPIXELFORMAT *pf, DWORD caps) {
+static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDPIXELFORMAT *pf, DWORD caps, DWORD creator_version) {
     RDDSurface *s = (RDDSurface *)calloc(1, sizeof(RDDSurface));
     if (!s) return NULL;
     s->lpVtbl = &g_surf_vtbl;
@@ -246,6 +604,8 @@ static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDP
     } else {
         fill_pixelformat_rgb565(&s->pixfmt);
     }
+    s->fmt_kind = detect_surface_format(&s->pixfmt);
+    s->creator_version = creator_version ? creator_version : 4;
 
     if (caps) {
         s->caps = caps;
@@ -263,7 +623,8 @@ static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDP
         }
     }
 
-    rdd_log("alloc_surface: %dx%dx%d type=%d pitch=%d caps=0x%lx", w, h, bpp, type, s->pitch, s->caps);
+    rdd_log("alloc_surface: %dx%dx%d type=%d pitch=%d caps=0x%lx fmt=%d dd=%lu",
+            w, h, bpp, type, s->pitch, s->caps, s->fmt_kind, s->creator_version);
     return s;
 }
 
@@ -299,6 +660,8 @@ static HRESULT WINAPI D3DTex_GetHandle(D3DTexObj *s, void *dev, void *handle) {
 static HRESULT WINAPI D3DTex_PaletteChanged(D3DTexObj *s, void *a, void *b) { rdd_log("D3DTex_PaletteChanged"); (void)s; (void)a; (void)b; return DD_OK; }
 static HRESULT WINAPI D3DTex_Load(D3DTexObj *s, void *src_tex) {
     D3DTexObj *src = (D3DTexObj *)src_tex;
+    BlitOptions opt;
+    RECT full;
     rdd_log("D3DTex_Load: dst=%p src=%p", (void*)s->surf, src_tex);
 
     if (!s || !surface_is_texture(s->surf) || !src || !surface_is_texture(src->surf)) {
@@ -312,17 +675,22 @@ static HRESULT WINAPI D3DTex_Load(D3DTexObj *s, void *src_tex) {
     }
 
     if (src->surf->width != s->surf->width ||
-        src->surf->height != s->surf->height ||
-        src->surf->pitch != s->surf->pitch) {
-        rdd_log("D3DTex_Load: size mismatch src=%lux%lu pitch=%ld dst=%lux%lu pitch=%ld",
+        src->surf->height != s->surf->height) {
+        rdd_log("D3DTex_Load: size mismatch src=%lux%lu pitch=%ld dst=%lux%lu pitch=%ld fmt=%d->%d",
                 src->surf->width, src->surf->height, src->surf->pitch,
-                s->surf->width, s->surf->height, s->surf->pitch);
+                s->surf->width, s->surf->height, s->surf->pitch,
+                src->surf->fmt_kind, s->surf->fmt_kind);
         return DDERR_INVALIDPARAMS;
     }
 
-    memcpy(s->surf->pixels, src->surf->pixels,
-           (size_t)(s->surf->pitch * s->surf->height));
-    rdd_log("D3DTex_Load: copied %lux%lu pixels", s->surf->width, s->surf->height);
+    memset(&opt, 0, sizeof(opt));
+    full.left = 0;
+    full.top = 0;
+    full.right = (LONG)s->surf->width;
+    full.bottom = (LONG)s->surf->height;
+    blit_surface_rect(s->surf, &full, src->surf, &full, &opt);
+    rdd_log("D3DTex_Load: copied %lux%lu pixels fmt=%d->%d", s->surf->width, s->surf->height,
+            src->surf->fmt_kind, s->surf->fmt_kind);
     return DD_OK;
 }
 
@@ -402,20 +770,34 @@ static ULONG WINAPI Surf_Release(RDDSurface *self) {
     int i;
     ULONG ref = --self->refcount;
     if (ref == 0) {
+        RDDSurface *back_buffer = self->back_buffer;
         rdd_log("Surf_Release: freeing surface type=%d", self->type);
         clear_texture_state_for_surface(self);
         for (i = 0; i < g_tex_count; i++) {
             if (g_tex_pool[i].surf == self)
                 g_tex_pool[i].surf = NULL;
         }
-        if (self->pixels) free(self->pixels);
-        if (self->back_buffer) {
-            /* Also free the back buffer if we own it */
-            if (self->back_buffer->pixels) free(self->back_buffer->pixels);
-            free(self->back_buffer);
+        if (self->owner_primary && self->owner_primary->back_buffer == self)
+            self->owner_primary->back_buffer = NULL;
+        self->owner_primary = NULL;
+        self->back_buffer = NULL;
+        if (self->clipper) {
+            Clip_Release(self->clipper);
+            self->clipper = NULL;
         }
+        if (self->hdc_bmp) DeleteObject(self->hdc_bmp);
+        if (self->hdc_mem) DeleteDC(self->hdc_mem);
+        self->hdc_mem = NULL;
+        self->hdc_bmp = NULL;
+        self->hdc_bits = NULL;
+        if (self->pixels) free(self->pixels);
         if (g_primary == self) g_primary = NULL;
         free(self);
+        if (back_buffer) {
+            if (back_buffer->owner_primary == self)
+                back_buffer->owner_primary = NULL;
+            Surf_Release(back_buffer);
+        }
     }
     return ref;
 }
@@ -435,9 +817,26 @@ static HRESULT WINAPI Surf_EnumOverlayZOrders(RDDSurface *s, DWORD f, void *c, v
 static HRESULT WINAPI Surf_GetBltStatus(RDDSurface *s, DWORD f)
     { (void)s; (void)f; return DD_OK; }
 static HRESULT WINAPI Surf_GetClipper(RDDSurface *s, void **c)
-    { (void)s; *c = NULL; return DDERR_NOCLIPPERATTACHED; }
+{
+    if (!c) return DDERR_INVALIDPARAMS;
+    if (!s->clipper) {
+        *c = NULL;
+        return DDERR_NOCLIPPERATTACHED;
+    }
+    Clip_AddRef(s->clipper);
+    *c = s->clipper;
+    return DD_OK;
+}
 static HRESULT WINAPI Surf_GetColorKey(RDDSurface *s, DWORD f, LPDDCOLORKEY k)
-    { (void)s; (void)f; (void)k; return DDERR_NOCOLORKEY; }
+{
+    const SurfaceColorKey *slot;
+    if (!k) return DDERR_INVALIDPARAMS;
+    slot = surface_get_colorkey_slot(s, f);
+    if (!slot || !slot->valid)
+        return DDERR_NOCOLORKEY;
+    *k = slot->value;
+    return DD_OK;
+}
 static HRESULT WINAPI Surf_GetDC(RDDSurface *s, HDC *hdc) {
     HDC screen_dc, mem_dc;
     BITMAPINFO bmi;
@@ -466,11 +865,7 @@ static HRESULT WINAPI Surf_GetDC(RDDSurface *s, HDC *hdc) {
         DWORD *dst = (DWORD *)((BYTE *)bits + y * s->width * 4);
         DWORD x;
         for (x = 0; x < s->width; x++) {
-            WORD p = src[x];
-            DWORD r = ((p >> 11) & 0x1F); r = (r << 3) | (r >> 2);
-            DWORD g = ((p >> 5) & 0x3F); g = (g << 2) | (g >> 4);
-            DWORD b = (p & 0x1F); b = (b << 3) | (b >> 2);
-            dst[x] = (r << 16) | (g << 8) | b;
+            dst[x] = pack_dib_color(decode_pixel16(s->fmt_kind, src[x]));
         }
     }
 
@@ -493,17 +888,20 @@ static HRESULT WINAPI Surf_Initialize(RDDSurface *s, void *dd, LPDDSURFACEDESC2 
 static HRESULT WINAPI Surf_ReleaseDC(RDDSurface *s, HDC hdc) {
     (void)hdc;
     if (s->hdc_bits) {
-        /* Convert 32-bit DIB back to surface RGB565 */
+        /* Convert 32-bit DIB back to the surface's native format */
         DWORD y;
         for (y = 0; y < s->height; y++) {
             DWORD *src = (DWORD *)((BYTE *)s->hdc_bits + y * s->width * 4);
             WORD *dst = (WORD *)(s->pixels + y * s->pitch);
             DWORD x;
             for (x = 0; x < s->width; x++) {
+                PixelRGBA color;
                 DWORD p = src[x];
-                dst[x] = (WORD)((((p >> 16) & 0xFF) >> 3) << 11 |
-                                (((p >> 8) & 0xFF) >> 2) << 5 |
-                                ((p & 0xFF) >> 3));
+                color.r = (BYTE)((p >> 16) & 0xFF);
+                color.g = (BYTE)((p >> 8) & 0xFF);
+                color.b = (BYTE)(p & 0xFF);
+                color.a = 0xFF;
+                dst[x] = encode_pixel16(s->fmt_kind, color);
             }
         }
     }
@@ -515,9 +913,28 @@ static HRESULT WINAPI Surf_ReleaseDC(RDDSurface *s, HDC hdc) {
     return DD_OK;
 }
 static HRESULT WINAPI Surf_SetClipper(RDDSurface *s, void *c)
-    { rdd_log("Surf_SetClipper: type=%d clipper=%p", s->type, c); return DD_OK; }
+{
+    RDDClipper *clip = (RDDClipper *)c;
+    if (clip)
+        Clip_AddRef(clip);
+    if (s->clipper)
+        Clip_Release(s->clipper);
+    s->clipper = clip;
+    rdd_log("Surf_SetClipper: type=%d clipper=%p", s->type, c);
+    return DD_OK;
+}
 static HRESULT WINAPI Surf_SetColorKey(RDDSurface *s, DWORD f, LPDDCOLORKEY k)
-    { (void)s; (void)f; (void)k; return DD_OK; }
+{
+    SurfaceColorKey *slot;
+    if (!k) return DDERR_INVALIDPARAMS;
+    slot = surface_pick_colorkey_slot(s, f);
+    if (!slot) return DDERR_INVALIDPARAMS;
+    slot->valid = TRUE;
+    slot->value = *k;
+    rdd_log("Surf_SetColorKey: type=%d flags=0x%lx low=0x%lx high=0x%lx",
+            s->type, f, k->dwColorSpaceLowValue, k->dwColorSpaceHighValue);
+    return DD_OK;
+}
 static HRESULT WINAPI Surf_SetOverlayPosition(RDDSurface *s, LONG x, LONG y)
     { (void)s; (void)x; (void)y; return DDERR_NOTAOVERLAYSURFACE; }
 static HRESULT WINAPI Surf_SetPalette(RDDSurface *s, void *p)
@@ -601,7 +1018,7 @@ static HRESULT WINAPI Surf_EnumAttachedSurfaces(RDDSurface *self, void *ctx, voi
 static HRESULT WINAPI Surf_GetDDInterface(RDDSurface *self, void **dd) {
     (void)self;
     g_dd_refcount++;
-    *dd = &g_dd4;
+    *dd = (self->creator_version == 1) ? (void *)&g_dd1 : (void *)&g_dd4;
     return DD_OK;
 }
 
@@ -619,7 +1036,8 @@ static HRESULT WINAPI Surf_Lock(RDDSurface *self, LPRECT rect, LPDDSURFACEDESC2 
     desc->dwFlags |= DDSD_LPSURFACE;
 
     if (rect) {
-        desc->lpSurface = self->pixels + (rect->top * self->pitch) + (rect->left * (self->bpp / 8));
+        int bytes_per_pixel = (int)((self->bpp + 7) / 8);
+        desc->lpSurface = self->pixels + (rect->top * self->pitch) + (rect->left * bytes_per_pixel);
     } else {
         desc->lpSurface = self->pixels;
     }
@@ -660,8 +1078,6 @@ static HRESULT WINAPI Surf_Flip(RDDSurface *self, RDDSurface *override, DWORD fl
 static HRESULT WINAPI Surf_Blt(RDDSurface *self, LPRECT dst_rect,
                                 RDDSurface *src, LPRECT src_rect,
                                 DWORD flags, LPDDBLTFX fx) {
-    static int logged = 0;
-
     /* Color fill */
     if (flags & DDBLT_COLORFILL) {
         WORD fill16 = (WORD)(fx->dwFillColor & 0xFFFF);
@@ -686,33 +1102,41 @@ static HRESULT WINAPI Surf_Blt(RDDSurface *self, LPRECT dst_rect,
 
     /* Surface-to-surface copy */
     if (src) {
-        RECT sr, dr;
-        int src_w, src_h, dst_w, dst_h, y;
-        int bytes_per_pixel = (int)(self->bpp / 8);
+        BlitOptions opt;
+        const SurfaceColorKey *slot;
+        memset(&opt, 0, sizeof(opt));
+        opt.apply_src_alpha = TRUE;
 
-        sr.left = 0; sr.top = 0;
-        sr.right = (LONG)src->width; sr.bottom = (LONG)src->height;
-        if (src_rect) sr = *src_rect;
-
-        dr.left = 0; dr.top = 0;
-        dr.right = (LONG)self->width; dr.bottom = (LONG)self->height;
-        if (dst_rect) dr = *dst_rect;
-
-        src_w = sr.right - sr.left;
-        src_h = sr.bottom - sr.top;
-        dst_w = dr.right - dr.left;
-        dst_h = dr.bottom - dr.top;
-
-        /* Simple copy (no stretch): use minimum dimensions */
-        if (src_w > dst_w) src_w = dst_w;
-        if (src_h > dst_h) src_h = dst_h;
-
-        for (y = 0; y < src_h; y++) {
-            BYTE *dst_row = self->pixels + (dr.top + y) * self->pitch + dr.left * bytes_per_pixel;
-            BYTE *src_row = src->pixels + (sr.top + y) * src->pitch + sr.left * bytes_per_pixel;
-            memcpy(dst_row, src_row, (size_t)(src_w * bytes_per_pixel));
+        if (flags & DDBLT_KEYSRCOVERRIDE) {
+            if (fx) {
+                opt.use_src_colorkey = TRUE;
+                opt.src_colorkey = fx->ddckSrcColorkey;
+            }
+        } else if (flags & DDBLT_KEYSRC) {
+            slot = surface_get_colorkey_slot(src, DDCKEY_SRCBLT);
+            if (slot && slot->valid) {
+                opt.use_src_colorkey = TRUE;
+                opt.src_colorkey = slot->value;
+            }
         }
-        { rdd_log("Surf_Blt: copy %dx%d to type=%d", src_w, src_h, self->type); }
+
+        if (flags & DDBLT_KEYDESTOVERRIDE) {
+            if (fx) {
+                opt.use_dst_colorkey = TRUE;
+                opt.dst_colorkey = fx->ddckDestColorkey;
+            }
+        } else if (flags & DDBLT_KEYDEST) {
+            slot = surface_get_colorkey_slot(self, DDCKEY_DESTBLT);
+            if (slot && slot->valid) {
+                opt.use_dst_colorkey = TRUE;
+                opt.dst_colorkey = slot->value;
+            }
+        }
+
+        blit_surface_rect(self, dst_rect, src, src_rect, &opt);
+        rdd_log("Surf_Blt: copy type=%d flags=0x%lx src_fmt=%d dst_fmt=%d src_ck=%d dst_ck=%d alpha=%d",
+                self->type, flags, src->fmt_kind, self->fmt_kind,
+                opt.use_src_colorkey, opt.use_dst_colorkey, opt.apply_src_alpha);
 
         /* Present if we just blitted to the primary surface */
         if (self->type == SURF_PRIMARY)
@@ -727,32 +1151,45 @@ static HRESULT WINAPI Surf_Blt(RDDSurface *self, LPRECT dst_rect,
 
 static HRESULT WINAPI Surf_BltFast(RDDSurface *self, DWORD dx, DWORD dy,
                                     RDDSurface *src, LPRECT src_rect, DWORD flags) {
-    RECT sr;
-    int w, h, y;
-    int bytes_per_pixel;
-    (void)flags;
+    RECT dr, sr;
+    BlitOptions opt;
+    const SurfaceColorKey *slot;
 
     if (!src) return DDERR_INVALIDPARAMS;
 
-    bytes_per_pixel = (int)(self->bpp / 8);
+    memset(&opt, 0, sizeof(opt));
+    opt.apply_src_alpha = TRUE;
 
-    sr.left = 0; sr.top = 0;
-    sr.right = (LONG)src->width; sr.bottom = (LONG)src->height;
+    if (flags & DDBLTFAST_SRCCOLORKEY) {
+        slot = surface_get_colorkey_slot(src, DDCKEY_SRCBLT);
+        if (slot && slot->valid) {
+            opt.use_src_colorkey = TRUE;
+            opt.src_colorkey = slot->value;
+        }
+    }
+    if (flags & DDBLTFAST_DESTCOLORKEY) {
+        slot = surface_get_colorkey_slot(self, DDCKEY_DESTBLT);
+        if (slot && slot->valid) {
+            opt.use_dst_colorkey = TRUE;
+            opt.dst_colorkey = slot->value;
+        }
+    }
+
+    sr.left = 0;
+    sr.top = 0;
+    sr.right = (LONG)src->width;
+    sr.bottom = (LONG)src->height;
     if (src_rect) sr = *src_rect;
 
-    w = sr.right - sr.left;
-    h = sr.bottom - sr.top;
+    dr.left = (LONG)dx;
+    dr.top = (LONG)dy;
+    dr.right = dr.left + (sr.right - sr.left);
+    dr.bottom = dr.top + (sr.bottom - sr.top);
 
-    /* Clip to destination */
-    if ((int)dx + w > (int)self->width)  w = (int)self->width - (int)dx;
-    if ((int)dy + h > (int)self->height) h = (int)self->height - (int)dy;
-    if (w <= 0 || h <= 0) return DD_OK;
-
-    for (y = 0; y < h; y++) {
-        BYTE *dst_row = self->pixels + ((int)dy + y) * self->pitch + (int)dx * bytes_per_pixel;
-        BYTE *src_row = src->pixels + (sr.top + y) * src->pitch + sr.left * bytes_per_pixel;
-        memcpy(dst_row, src_row, (size_t)(w * bytes_per_pixel));
-    }
+    blit_surface_rect(self, &dr, src, &sr, &opt);
+    rdd_log("Surf_BltFast: type=%d flags=0x%lx src_fmt=%d dst_fmt=%d src_ck=%d dst_ck=%d alpha=%d",
+            self->type, flags, src->fmt_kind, self->fmt_kind,
+            opt.use_src_colorkey, opt.use_dst_colorkey, opt.apply_src_alpha);
 
     /* Present if we just blitted to the primary surface */
     if (self->type == SURF_PRIMARY)
@@ -1418,7 +1855,15 @@ struct RDDClipper {
 };
 
 static HRESULT WINAPI Clip_QueryInterface(RDDClipper *s, REFIID r, void **o)
-    { (void)s; (void)r; *o = NULL; return E_NOINTERFACE; }
+{
+    if (guid_eq(r, &MY_IID_IUnknown) || guid_eq(r, &MY_IID_IDirectDrawClipper)) {
+        Clip_AddRef(s);
+        *o = s;
+        return S_OK;
+    }
+    *o = NULL;
+    return E_NOINTERFACE;
+}
 static ULONG WINAPI Clip_AddRef(RDDClipper *s) { return ++s->refcount; }
 static ULONG WINAPI Clip_Release(RDDClipper *s) {
     ULONG ref = --s->refcount;
@@ -1426,7 +1871,52 @@ static ULONG WINAPI Clip_Release(RDDClipper *s) {
     return ref;
 }
 static HRESULT WINAPI Clip_GetClipList(RDDClipper *s, LPRECT r, void *rgn, DWORD *sz)
-    { (void)s; (void)r; (void)rgn; (void)sz; return DDERR_UNSUPPORTED; }
+{
+    RECT clip;
+    RECT out_rect;
+    RGNDATA *data = (RGNDATA *)rgn;
+    DWORD needed = sizeof(RGNDATAHEADER) + sizeof(RECT);
+
+    if (!sz)
+        return DDERR_INVALIDPARAMS;
+
+    if (s->hwnd && IsWindow(s->hwnd)) {
+        GetClientRect(s->hwnd, &clip);
+    } else if (g_primary) {
+        clip.left = 0;
+        clip.top = 0;
+        clip.right = (LONG)g_primary->width;
+        clip.bottom = (LONG)g_primary->height;
+    } else {
+        clip.left = 0;
+        clip.top = 0;
+        clip.right = 640;
+        clip.bottom = 480;
+    }
+
+    out_rect = clip;
+    if (r && !IntersectRect(&out_rect, &clip, r))
+        SetRectEmpty(&out_rect);
+
+    if (!rgn) {
+        *sz = needed;
+        return DD_OK;
+    }
+    if (*sz < needed) {
+        *sz = needed;
+        return DDERR_REGIONTOOSMALL;
+    }
+
+    memset(data, 0, needed);
+    data->rdh.dwSize = sizeof(RGNDATAHEADER);
+    data->rdh.iType = RDH_RECTANGLES;
+    data->rdh.nCount = 1;
+    data->rdh.nRgnSize = sizeof(RECT);
+    data->rdh.rcBound = out_rect;
+    memcpy(data->Buffer, &out_rect, sizeof(RECT));
+    *sz = needed;
+    return DD_OK;
+}
 static HRESULT WINAPI Clip_GetHWnd(RDDClipper *s, HWND *h)
     { *h = s->hwnd; return DD_OK; }
 static HRESULT WINAPI Clip_Initialize(RDDClipper *s, void *dd, DWORD f)
@@ -1456,20 +1946,28 @@ static RDDClipperVtbl g_clip_vtbl = {
     Clip_IsClipListChanged, Clip_SetClipList, Clip_SetHWnd
 };
 
+static HRESULT create_clipper_instance(HWND hwnd, void **out) {
+    RDDClipper *clip;
+    if (!out) return DDERR_INVALIDPARAMS;
+    clip = (RDDClipper *)calloc(1, sizeof(RDDClipper));
+    if (!clip) {
+        *out = NULL;
+        return DDERR_OUTOFMEMORY;
+    }
+    clip->lpVtbl = &g_clip_vtbl;
+    clip->refcount = 1;
+    clip->hwnd = hwnd;
+    *out = clip;
+    return DD_OK;
+}
+
 /* DD4 stubs */
 static HRESULT WINAPI DD4_Compact(DD4Obj *s)
     { (void)s; return DD_OK; }
 static HRESULT WINAPI DD4_CreateClipper(DD4Obj *s, DWORD f, void **c, void *o) {
-    RDDClipper *clip;
     (void)s; (void)f; (void)o;
-    clip = (RDDClipper *)calloc(1, sizeof(RDDClipper));
-    if (!clip) { *c = NULL; return DDERR_OUTOFMEMORY; }
-    clip->lpVtbl = &g_clip_vtbl;
-    clip->refcount = 1;
-    clip->hwnd = g_hwnd;
-    *c = clip;
     rdd_log("DD4_CreateClipper: created");
-    return DD_OK;
+    return create_clipper_instance(g_hwnd, c);
 }
 static HRESULT WINAPI DD4_CreatePalette(DD4Obj *s, DWORD f, void *e, void **p, void *o)
     { (void)s; (void)f; (void)e; (void)o; *p = NULL; rdd_log("DD4_CreatePalette: unsupported"); return DDERR_UNSUPPORTED; }
@@ -1482,7 +1980,17 @@ static HRESULT WINAPI DD4_FlipToGDISurface(DD4Obj *s)
 static HRESULT WINAPI DD4_GetFourCCCodes(DD4Obj *s, DWORD *n, DWORD *c)
     { (void)s; (void)c; *n = 0; return DD_OK; }
 static HRESULT WINAPI DD4_GetGDISurface(DD4Obj *s, RDDSurface **surf)
-    { (void)s; *surf = NULL; return DDERR_NOTFOUND; }
+{
+    (void)s;
+    if (!surf) return DDERR_INVALIDPARAMS;
+    if (!g_primary) {
+        *surf = NULL;
+        return DDERR_NOTFOUND;
+    }
+    Surf_AddRef(g_primary);
+    *surf = g_primary;
+    return DD_OK;
+}
 static HRESULT WINAPI DD4_GetScanLine(DD4Obj *s, DWORD *sl)
     { (void)s; *sl = 0; return DD_OK; }
 static HRESULT WINAPI DD4_Initialize(DD4Obj *s, GUID *g)
@@ -1558,21 +2066,42 @@ static HRESULT WINAPI DD4_GetDeviceIdentifier(DD4Obj *self, void *di_raw, DWORD 
 static HRESULT WINAPI DD4_RestoreDisplayMode(DD4Obj *self) {
     (void)self;
     rdd_log("DD4_RestoreDisplayMode");
+    restore_window_state();
     return DD_OK;
 }
 
 static HRESULT WINAPI DD4_SetCooperativeLevel(DD4Obj *self, HWND hwnd, DWORD flags) {
     (void)self;
     rdd_log("DD4_SetCooperativeLevel: hwnd=%p flags=0x%lx", (void*)hwnd, flags);
+    if (g_hwnd != hwnd)
+        g_window_state_saved = FALSE;
     g_hwnd = hwnd;
 
     return DD_OK;
+}
+
+static void save_window_state(void) {
+    if (!g_hwnd || g_window_state_saved || !IsWindow(g_hwnd))
+        return;
+
+    GetWindowRect(g_hwnd, &g_window_rect);
+    g_window_style = (DWORD)GetWindowLongA(g_hwnd, GWL_STYLE);
+    g_window_ex_style = (DWORD)GetWindowLongA(g_hwnd, GWL_EXSTYLE);
+    g_window_state_saved = TRUE;
+
+    rdd_log("save_window_state: rect=%ld,%ld %ldx%ld style=0x%lx ex=0x%lx",
+            g_window_rect.left, g_window_rect.top,
+            g_window_rect.right - g_window_rect.left,
+            g_window_rect.bottom - g_window_rect.top,
+            g_window_style, g_window_ex_style);
 }
 
 static void setup_fullscreen_window(void) {
     int screen_w, screen_h;
 
     if (!g_hwnd) return;
+
+    save_window_state();
 
     screen_w = GetSystemMetrics(SM_CXSCREEN);
     screen_h = GetSystemMetrics(SM_CYSCREEN);
@@ -1584,6 +2113,25 @@ static void setup_fullscreen_window(void) {
                  SWP_SHOWWINDOW);
 
     rdd_log("setup_fullscreen_window: %dx%d", screen_w, screen_h);
+}
+
+static void restore_window_state(void) {
+    if (!g_hwnd || !g_window_state_saved || !IsWindow(g_hwnd))
+        return;
+
+    SetWindowLongA(g_hwnd, GWL_STYLE, (LONG)g_window_style);
+    SetWindowLongA(g_hwnd, GWL_EXSTYLE, (LONG)g_window_ex_style);
+    SetWindowPos(g_hwnd, NULL,
+                 g_window_rect.left, g_window_rect.top,
+                 g_window_rect.right - g_window_rect.left,
+                 g_window_rect.bottom - g_window_rect.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+    rdd_log("restore_window_state: rect=%ld,%ld %ldx%ld style=0x%lx ex=0x%lx",
+            g_window_rect.left, g_window_rect.top,
+            g_window_rect.right - g_window_rect.left,
+            g_window_rect.bottom - g_window_rect.top,
+            g_window_style, g_window_ex_style);
 }
 
 static HRESULT WINAPI DD4_SetDisplayMode(DD4Obj *self, DWORD w, DWORD h, DWORD bpp,
@@ -1627,15 +2175,16 @@ static HRESULT WINAPI DD4_CreateSurface(DD4Obj *self, LPDDSURFACEDESC2 desc,
 
     if (caps & DDSCAPS_PRIMARYSURFACE) {
         RDDSurface *primary = alloc_surface(SURF_PRIMARY, 640, 480, 16, NULL,
-                                            DDSCAPS_PRIMARYSURFACE | DDSCAPS_FLIP | DDSCAPS_COMPLEX | DDSCAPS_VISIBLE);
+                                            DDSCAPS_PRIMARYSURFACE | DDSCAPS_FLIP | DDSCAPS_COMPLEX | DDSCAPS_VISIBLE, 4);
         RDDSurface *backbuf = alloc_surface(SURF_BACKBUFFER, 640, 480, 16, NULL,
-                                            DDSCAPS_BACKBUFFER | DDSCAPS_FLIP | DDSCAPS_COMPLEX);
+                                            DDSCAPS_BACKBUFFER | DDSCAPS_FLIP | DDSCAPS_COMPLEX, 4);
         if (!primary || !backbuf) {
             if (primary) { free(primary->pixels); free(primary); }
             if (backbuf) { free(backbuf->pixels); free(backbuf); }
             return DDERR_OUTOFMEMORY;
         }
         primary->back_buffer = backbuf;
+        backbuf->owner_primary = primary;
         g_primary = primary;
         *out = primary;
         rdd_log("DD4_CreateSurface: created primary + backbuffer");
@@ -1666,7 +2215,7 @@ static HRESULT WINAPI DD4_CreateSurface(DD4Obj *self, LPDDSURFACEDESC2 desc,
         }
         {
         DDPIXELFORMAT *fmt = (desc->dwFlags & DDSD_PIXELFORMAT) ? &desc->ddpfPixelFormat : NULL;
-        *out = alloc_surface(SURF_OFFSCREEN, w, h, bpp, fmt, caps);
+        *out = alloc_surface(SURF_OFFSCREEN, w, h, bpp, fmt, caps, 4);
         }
         if (!*out) return DDERR_OUTOFMEMORY;
         rdd_log("DD4_CreateSurface: created %s %lux%lux%lu reported_caps=0x%lx", kind, w, h, bpp, (*out)->caps);
@@ -1787,11 +2336,47 @@ static ULONG WINAPI DD1_Release(DD1Obj *self) {
 /* DD1 stubs - these use void* for v1-specific param types we don't implement */
 static HRESULT WINAPI DD1_Compact(DD1Obj *s) { (void)s; return DD_OK; }
 static HRESULT WINAPI DD1_CreateClipper(DD1Obj *s, DWORD f, void **c, void *o)
-    { (void)s; (void)f; (void)o; *c = NULL; return DDERR_UNSUPPORTED; }
+    { (void)s; (void)f; (void)o; rdd_log("DD1_CreateClipper: created"); return create_clipper_instance(g_hwnd, c); }
 static HRESULT WINAPI DD1_CreatePalette(DD1Obj *s, DWORD f, void *e, void **p, void *o)
     { (void)s; (void)f; (void)e; (void)o; *p = NULL; return DDERR_UNSUPPORTED; }
 static HRESULT WINAPI DD1_CreateSurface_v1(DD1Obj *s, void *desc, void **out, void *o)
-    { (void)s; (void)desc; (void)o; *out = NULL; rdd_log("DD1_CreateSurface_v1: not implemented"); return DDERR_UNSUPPORTED; }
+{
+    DDSURFACEDESC *desc1 = (DDSURFACEDESC *)desc;
+    DDSURFACEDESC2 desc2;
+    HRESULT hr;
+    RDDSurface *surf;
+    (void)s;
+    if (!desc1 || !out) return DDERR_INVALIDPARAMS;
+
+    memset(&desc2, 0, sizeof(desc2));
+    desc2.dwSize = sizeof(desc2);
+    desc2.dwFlags = desc1->dwFlags;
+    desc2.dwHeight = desc1->dwHeight;
+    desc2.dwWidth = desc1->dwWidth;
+    desc2.lPitch = desc1->lPitch;
+    desc2.dwBackBufferCount = desc1->dwBackBufferCount;
+    desc2.dwMipMapCount = desc1->dwMipMapCount;
+    desc2.dwAlphaBitDepth = desc1->dwAlphaBitDepth;
+    desc2.lpSurface = desc1->lpSurface;
+    desc2.ddckCKDestOverlay = desc1->ddckCKDestOverlay;
+    desc2.ddckCKDestBlt = desc1->ddckCKDestBlt;
+    desc2.ddckCKSrcOverlay = desc1->ddckCKSrcOverlay;
+    desc2.ddckCKSrcBlt = desc1->ddckCKSrcBlt;
+    desc2.ddpfPixelFormat = desc1->ddpfPixelFormat;
+    desc2.ddsCaps.dwCaps = desc1->ddsCaps.dwCaps;
+
+    hr = DD4_CreateSurface(&g_dd4, &desc2, (RDDSurface **)out, o);
+    if (hr != DD_OK)
+        return hr;
+
+    surf = (RDDSurface *)(*out);
+    surf->creator_version = 1;
+    if (surf->back_buffer)
+        surf->back_buffer->creator_version = 1;
+
+    rdd_log("DD1_CreateSurface_v1: delegated caps=0x%lx w=%lu h=%lu", desc2.ddsCaps.dwCaps, desc2.dwWidth, desc2.dwHeight);
+    return DD_OK;
+}
 static HRESULT WINAPI DD1_DuplicateSurface(DD1Obj *s, void *a, void **b)
     { (void)s; (void)a; *b = NULL; return DDERR_UNSUPPORTED; }
 static HRESULT WINAPI DD1_EnumDisplayModes(DD1Obj *s, DWORD f, void *d, void *c, void *cb)
@@ -1818,7 +2403,17 @@ static HRESULT WINAPI DD1_GetDisplayMode_v1(DD1Obj *s, void *desc) {
 static HRESULT WINAPI DD1_GetFourCCCodes(DD1Obj *s, DWORD *n, DWORD *c)
     { (void)s; (void)c; *n = 0; return DD_OK; }
 static HRESULT WINAPI DD1_GetGDISurface(DD1Obj *s, void **surf)
-    { (void)s; *surf = NULL; return DDERR_NOTFOUND; }
+{
+    (void)s;
+    if (!surf) return DDERR_INVALIDPARAMS;
+    if (!g_primary) {
+        *surf = NULL;
+        return DDERR_NOTFOUND;
+    }
+    Surf_AddRef(g_primary);
+    *surf = g_primary;
+    return DD_OK;
+}
 static HRESULT WINAPI DD1_GetMonitorFrequency(DD1Obj *s, DWORD *f)
     { (void)s; *f = 60; return DD_OK; }
 static HRESULT WINAPI DD1_GetScanLine(DD1Obj *s, DWORD *sl)
@@ -1827,11 +2422,13 @@ static HRESULT WINAPI DD1_GetVerticalBlankStatus(DD1Obj *s, BOOL *st)
     { (void)s; *st = TRUE; return DD_OK; }
 static HRESULT WINAPI DD1_Initialize(DD1Obj *s, GUID *g)
     { (void)s; (void)g; return DDERR_ALREADYINITIALIZED; }
-static HRESULT WINAPI DD1_RestoreDisplayMode(DD1Obj *s) { (void)s; return DD_OK; }
+static HRESULT WINAPI DD1_RestoreDisplayMode(DD1Obj *s) { (void)s; restore_window_state(); return DD_OK; }
 
 static HRESULT WINAPI DD1_SetCooperativeLevel(DD1Obj *self, HWND hwnd, DWORD flags) {
     (void)self;
     rdd_log("DD1_SetCooperativeLevel: hwnd=%p flags=0x%lx", (void*)hwnd, flags);
+    if (g_hwnd != hwnd)
+        g_window_state_saved = FALSE;
     g_hwnd = hwnd;
     return DD_OK;
 }
@@ -1948,9 +2545,8 @@ HRESULT WINAPI DirectDrawCreateEx(GUID *driver, void **ddraw, REFIID iid, IUnkno
 
 HRESULT WINAPI DirectDrawCreateClipper(DWORD flags, LPDIRECTDRAWCLIPPER *clipper, IUnknown *outer) {
     (void)flags; (void)outer;
-    rdd_log("DirectDrawCreateClipper called (not supported)");
-    *clipper = NULL;
-    return DDERR_UNSUPPORTED;
+    rdd_log("DirectDrawCreateClipper called");
+    return create_clipper_instance(NULL, (void **)clipper);
 }
 
 HRESULT WINAPI DirectDrawEnumerateA(LPDDENUMCALLBACKA cb, void *ctx) {

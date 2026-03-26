@@ -29,11 +29,11 @@ The custom `ddraw.dll` (source: `patch/revenant_ddraw.c`) is a complete DirectDr
 
 - **Replaces Wine's DirectDraw completely.** The DLL exports `DirectDrawCreate`, `DirectDrawCreateEx`, and the other standard entry points. When the game loads `ddraw.dll`, it gets our implementation instead of Wine's.
 - **Implements IDirectDraw4, IDirectDrawSurface4, IDirect3D3 (stub), IDirect3DDevice3 (stub).** These are the COM interfaces the game queries for during initialization.
-- **Manages its own pixel buffers.** The primary surface and back buffer are allocated as plain memory buffers at 640x480x16 in RGB565 format. The game locks these surfaces, writes pixels, and unlocks them, just as it would with real DirectDraw surfaces.
-- **Presents frames via StretchDIBits.** On every `Blt` call that targets the primary surface, the DLL converts the RGB565 pixel data to RGB8888 using a precomputed lookup table, then calls `StretchDIBits` to scale the 640x480 image to fill the game window. The HALFTONE stretch mode provides smooth scaling.
+- **Manages its own pixel buffers.** The primary surface and back buffer are allocated as plain memory buffers at 640x480x16 in RGB565 format. Offscreen and texture surfaces preserve their requested 16-bit pixel formats, and the DLL tracks per-surface color-key, clipper, and creator-interface state.
+- **Presents frames via StretchDIBits.** On every `Blt` call that targets the primary surface, the DLL converts the primary-surface pixels to RGB8888 and calls `StretchDIBits` to scale the 640x480 image to fill the game window. The HALFTONE stretch mode provides smooth scaling.
 - **Provides minimal D3D stubs.** The game queries `IDirectDraw4` for `IDirect3D3`, then creates a `IDirect3DDevice3` and `IDirect3DViewport3`. These are all stubbed to return success so the game passes its initialization checks without actually using hardware 3D.
-- **Implements GetDC/ReleaseDC.** The game uses `GetDC` on surfaces to draw text via GDI (for menus and UI). The custom implementation creates a temporary 32-bit DIB section, copies the RGB565 surface data into it, hands the DC to the game, then copies the modified pixels back on `ReleaseDC`.
-- **Implements IDirect3DTexture2.** Surfaces created with `DDSCAPS_TEXTURE` can be queried for the texture interface. The implementation provides `GetHandle` (returns a handle based on the surface pointer) and `Load` (copies pixel data between texture surfaces).
+- **Implements GetDC/ReleaseDC.** The game uses `GetDC` on surfaces to draw text via GDI (for menus and UI). The custom implementation creates a temporary 32-bit DIB section, converts the surface's native 16-bit format into it, hands the DC to the game, then converts the modified pixels back on `ReleaseDC`.
+- **Implements IDirect3DTexture2.** Surfaces created with `DDSCAPS_TEXTURE` can be queried for the texture interface. The implementation provides `GetHandle` (returns a handle based on the surface pointer) and `Load` (copies or converts pixel data between supported 16-bit texture surfaces).
 
 ## Step 1: Install via Porting Kit
 
@@ -98,12 +98,14 @@ The game renders at 640x480 and the custom DLL scales the output to fill the ent
 - **Gameplay now starts.** The previous startup failure when beginning a New Game is fixed. The custom DLL now preserves `DDSCAPS_TEXTURE` / `DDSCAPS_ALLOCONLOAD` on texture surfaces, and the game reaches in-game rendering instead of failing during texture setup.
 - **Fullscreen rendering works through gameplay.** Intro cinematics, the main menu, and live gameplay all render through the replacement `ddraw.dll`.
 - **Texture uploads now complete.** `revenant_ddraw.log` shows texture surfaces being created with their requested caps intact and `IDirect3DTexture2::Load` copying texture data successfully.
+- **March 26, 2026 code update:** The DLL now has format-aware 16-bit blits for `RGB565`, `RGB555`, `ARGB1555`, and `ARGB4444`, applies stored source/destination color keys during `Blt`/`BltFast`, converts non-RGB565 surfaces correctly in `GetDC` / `ReleaseDC` / `IDirect3DTexture2::Load`, implements a working clipper object, supports `IDirectDraw` v1 `CreateSurface`, returns the primary surface from `GetGDISurface`, and restores the original window state in `RestoreDisplayMode`. The updated source compiles and links successfully with `i686-w64-mingw32-gcc`.
+- **March 26, 2026 user validation:** Despite the changes above, in-game testing produced the same three unresolved issues listed below with no visible improvement.
 
 ## Known Limitations
 
-- **Pink / magenta rendering remains in gameplay.** Some parts of the HUD, menus, or dialog overlays render as solid pink or magenta blocks. This likely means there is still a remaining issue in the custom surface presentation path for alpha-bearing texture formats such as ARGB4444 / ARGB1555, or in transparency / color-key handling after texture upload.
-- **Escape -> Save Game does not open the save dialog.** The in-game menu appears, but choosing Save Game does not display the save-game dialog window.
-- **Escape -> Exit Program freezes the game.** Choosing Exit Program from the in-game menu does not shut the process down cleanly; the game becomes unresponsive instead.
+- **Pink / magenta rendering remains in gameplay.** Some parts of the HUD, menus, or dialog overlays still render as solid pink or magenta blocks even after adding format-aware `ARGB1555` / `ARGB4444` conversion and color-key handling. The remaining bug is likely in another unsupported UI path such as an unhandled blit flag combination, overlay semantics, palette behavior, or a surface/update path that still bypasses the new conversion logic.
+- **Escape -> Save Game does not open the save dialog.** The in-game menu appears, but choosing Save Game still does not display the save-game dialog window. Adding clipper support, `GetGDISurface`, and `IDirectDraw` v1 surface creation was not enough to make the modal dialog path render or become interactive.
+- **Escape -> Exit Program freezes the game.** Choosing Exit Program from the in-game menu still does not shut the process down cleanly; the game becomes unresponsive instead. This may be the same root issue as the missing save dialog if the game is waiting on an invisible confirmation dialog, but that has not yet been confirmed.
 - **Aspect ratio.** The game's 4:3 content is stretched to fill the screen. If the display is 16:10 or wider, there will be slight horizontal stretching.
 - **No Flip-based rendering.** The game uses `Blt` (not `Flip`) to present frames. The fullscreen scaling triggers on every `Blt` to the primary surface.
 
@@ -145,7 +147,7 @@ The DLL implements COM interfaces using C vtable structs:
 
 ### Window Resizing in SetDisplayMode
 
-When the game calls `SetDisplayMode(640, 480, 16)`, the custom DLL does not actually change the display resolution. Instead, it resizes the game window to fill the screen by calling `SetWindowPos` with coordinates `(0, 0, screen_width, screen_height)` and flags `SWP_NOZORDER | SWP_FRAMECHANGED`. It also strips the window style to `WS_POPUP` (no title bar or borders) for a clean fullscreen look.
+When the game calls `SetDisplayMode(640, 480, 16)`, the custom DLL does not actually change the display resolution. Instead, it resizes the game window to fill the screen by calling `SetWindowPos` with coordinates `(0, 0, screen_width, screen_height)`. The current implementation intentionally keeps the existing window style instead of switching to `WS_POPUP`, because changing the style caused Wine / Porting Kit to intercept Escape as a fullscreen toggle or exit action.
 
 ### IDirect3D3, IDirect3DDevice3, and IDirect3DViewport3 Stubs
 
@@ -162,6 +164,6 @@ These stubs exist because the game checks for D3D device availability during ini
 Surfaces created with `DDSCAPS_TEXTURE` preserve their requested DirectDraw caps and can be queried for the `IDirect3DTexture2` interface. The implementation:
 
 - **GetHandle:** Returns a handle derived from the surface pointer. The game uses these handles in `SetRenderState(D3DRENDERSTATE_TEXTUREHANDLE, ...)` calls.
-- **Load:** Copies pixel data from one texture surface to another (same dimensions required). This is used by the game to upload texture data to "device" textures.
+- **Load:** Copies pixel data from one texture surface to another, converting between the supported 16-bit formats when needed. This is used by the game to upload texture data to "device" textures.
 
 A pool of up to 256 texture objects is maintained (`g_tex_pool`), mapping surfaces to their texture interface wrappers.
