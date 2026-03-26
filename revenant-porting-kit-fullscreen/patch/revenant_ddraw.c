@@ -171,7 +171,7 @@ static void present_frame(RDDSurface *primary) {
     WORD *src;
     int win_w, win_h, dest_w, dest_h, dest_x, dest_y;
 
-    if (!g_hwnd || !primary || !primary->pixels || !g_present_buf || !g_is_fullscreen) return;
+    if (!g_hwnd || !primary || !primary->pixels || !g_present_buf) return;
 
     /* Convert RGB565 -> BGR8888 */
     src = (WORD *)primary->pixels;
@@ -180,11 +180,12 @@ static void present_frame(RDDSurface *primary) {
         g_present_buf[i] = g_rgb565_lut[src[i]];
 
     GetClientRect(g_hwnd, &rc);
-    hdc = GetDC(g_hwnd);
-    if (!hdc) return;
-
     win_w = rc.right;
     win_h = rc.bottom;
+    if (win_w <= 0 || win_h <= 0) return;
+
+    hdc = GetDC(g_hwnd);
+    if (!hdc) return;
 
     /* Compute centered 4:3 rectangle preserving aspect ratio */
     if (win_w * 3 > win_h * 4) {
@@ -1475,8 +1476,12 @@ static HRESULT WINAPI DD4_DuplicateSurface(DD4Obj *s, RDDSurface *a, RDDSurface 
     { rdd_log("DD4_DuplicateSurface: UNSUPPORTED"); (void)s; (void)a; *b = NULL; return DDERR_UNSUPPORTED; }
 static HRESULT WINAPI DD4_EnumSurfaces(DD4Obj *s, DWORD f, LPDDSURFACEDESC2 d, void *c, void *cb)
     { rdd_log("DD4_EnumSurfaces called"); (void)s; (void)f; (void)d; (void)c; (void)cb; return DD_OK; }
-static HRESULT WINAPI DD4_FlipToGDISurface(DD4Obj *s)
-    { (void)s; return DD_OK; }
+static HRESULT WINAPI DD4_FlipToGDISurface(DD4Obj *s) {
+    (void)s;
+    rdd_log("DD4_FlipToGDISurface: presenting current frame");
+    if (g_primary) present_frame(g_primary);
+    return DD_OK;
+}
 static HRESULT WINAPI DD4_GetFourCCCodes(DD4Obj *s, DWORD *n, DWORD *c)
     { (void)s; (void)c; *n = 0; return DD_OK; }
 static HRESULT WINAPI DD4_GetGDISurface(DD4Obj *s, RDDSurface **surf)
@@ -1559,32 +1564,44 @@ static HRESULT WINAPI DD4_RestoreDisplayMode(DD4Obj *self) {
     (void)self;
     rdd_log("DD4_RestoreDisplayMode");
     restore_window();
+    /* Post WM_DISPLAYCHANGE so the game knows the mode was restored.
+     * Real DirectDraw generates this after a physical mode change;
+     * we never actually change the mode, so we must send it manually.
+     * Use PostMessage (async) to avoid blocking the caller. */
+    if (g_hwnd)
+        PostMessageA(g_hwnd, WM_DISPLAYCHANGE, 16, MAKELPARAM(640, 480));
     return DD_OK;
 }
 
 static HRESULT WINAPI DD4_SetCooperativeLevel(DD4Obj *self, HWND hwnd, DWORD flags) {
     (void)self;
     rdd_log("DD4_SetCooperativeLevel: hwnd=%p flags=0x%lx", (void*)hwnd, flags);
-    g_hwnd = hwnd;
+    if (hwnd) g_hwnd = hwnd;
 
     /* DDSCL_NORMAL (0x8): game is leaving exclusive mode (e.g. during exit) */
-    if (flags & DDSCL_NORMAL)
+    if (flags & DDSCL_NORMAL) {
         restore_window();
+        if (g_hwnd)
+            PostMessageA(g_hwnd, WM_DISPLAYCHANGE, 16, MAKELPARAM(640, 480));
+    }
 
     return DD_OK;
 }
 
 static void restore_window(void) {
+    rdd_log("restore_window: enter g_is_fullscreen=%d g_hwnd=%p",
+            g_is_fullscreen, (void*)g_hwnd);
     if (!g_is_fullscreen || !g_hwnd) return;
     g_is_fullscreen = FALSE;
+    rdd_log("restore_window: calling SetWindowPos to %ldx%ld",
+            g_orig_rect.right - g_orig_rect.left,
+            g_orig_rect.bottom - g_orig_rect.top);
     SetWindowPos(g_hwnd, HWND_NOTOPMOST,
                  g_orig_rect.left, g_orig_rect.top,
                  g_orig_rect.right - g_orig_rect.left,
                  g_orig_rect.bottom - g_orig_rect.top,
-                 SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-    rdd_log("restore_window: restored to %ldx%ld",
-            g_orig_rect.right - g_orig_rect.left,
-            g_orig_rect.bottom - g_orig_rect.top);
+                 SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS);
+    rdd_log("restore_window: SetWindowPos returned");
 }
 
 static void setup_fullscreen_window(void) {
@@ -1602,7 +1619,7 @@ static void setup_fullscreen_window(void) {
      * Changing to WS_POPUP causes Wine/Porting Kit to intercept Esc as
      * "exit fullscreen", which kills the game. */
     SetWindowPos(g_hwnd, HWND_TOP, 0, 0, screen_w, screen_h,
-                 SWP_SHOWWINDOW);
+                 SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS);
 
     g_is_fullscreen = TRUE;
     rdd_log("setup_fullscreen_window: %dx%d (saved orig %ldx%ld)",
@@ -1700,9 +1717,26 @@ static HRESULT WINAPI DD4_CreateSurface(DD4Obj *self, LPDDSURFACEDESC2 desc,
         return DD_OK;
     }
 
-    rdd_log("DD4_CreateSurface: unhandled caps=0x%lx", caps);
-    *out = NULL;
-    return DDERR_INVALIDCAPS;
+    /* Treat any unrecognized caps as an offscreen plain surface.
+     * Some game UI paths (save dialog, etc.) may request surfaces
+     * with unusual cap combinations that would otherwise fail. */
+    {
+        DWORD w = desc->dwWidth;
+        DWORD h = desc->dwHeight;
+        DWORD bpp = 16;
+        DDPIXELFORMAT *fmt;
+        if (w == 0) w = 640;
+        if (h == 0) h = 480;
+        if (desc->dwFlags & DDSD_PIXELFORMAT) {
+            DDPIXELFORMAT *pf = &desc->ddpfPixelFormat;
+            if (pf->dwRGBBitCount > 0) bpp = pf->dwRGBBitCount;
+        }
+        fmt = (desc->dwFlags & DDSD_PIXELFORMAT) ? &desc->ddpfPixelFormat : NULL;
+        *out = alloc_surface(SURF_OFFSCREEN, w, h, bpp, fmt, caps);
+        if (!*out) return DDERR_OUTOFMEMORY;
+        rdd_log("DD4_CreateSurface: created fallback offscreen %lux%lux%lu for caps=0x%lx", w, h, bpp, caps);
+        return DD_OK;
+    }
 }
 
 /* ================================================================
@@ -1825,7 +1859,12 @@ static HRESULT WINAPI DD1_EnumDisplayModes(DD1Obj *s, DWORD f, void *d, void *c,
     { (void)s; (void)f; (void)d; (void)c; (void)cb; return DD_OK; }
 static HRESULT WINAPI DD1_EnumSurfaces(DD1Obj *s, DWORD f, void *d, void *c, void *cb)
     { (void)s; (void)f; (void)d; (void)c; (void)cb; return DD_OK; }
-static HRESULT WINAPI DD1_FlipToGDISurface(DD1Obj *s) { (void)s; return DD_OK; }
+static HRESULT WINAPI DD1_FlipToGDISurface(DD1Obj *s) {
+    (void)s;
+    rdd_log("DD1_FlipToGDISurface: presenting current frame");
+    if (g_primary) present_frame(g_primary);
+    return DD_OK;
+}
 static HRESULT WINAPI DD1_GetCaps(DD1Obj *s, LPDDCAPS h, LPDDCAPS e)
     { (void)s; return DD4_GetCaps(NULL, h, e); }
 static HRESULT WINAPI DD1_GetDisplayMode_v1(DD1Obj *s, void *desc) {
@@ -1859,7 +1898,7 @@ static HRESULT WINAPI DD1_RestoreDisplayMode(DD1Obj *s) { (void)s; return DD_OK;
 static HRESULT WINAPI DD1_SetCooperativeLevel(DD1Obj *self, HWND hwnd, DWORD flags) {
     (void)self;
     rdd_log("DD1_SetCooperativeLevel: hwnd=%p flags=0x%lx", (void*)hwnd, flags);
-    g_hwnd = hwnd;
+    if (hwnd) g_hwnd = hwnd;
     return DD_OK;
 }
 
