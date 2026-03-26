@@ -925,6 +925,19 @@ static ULONG WINAPI D3D_Release(D3DObj *self) { (void)self; if (g_dd_refcount > 
 typedef struct D3DDevObj D3DDevObj;
 struct D3DDevObj { void **lpVtbl; };
 
+/* D3D render state storage - the game uses Set/Get pairs as a key-value store
+ * for its software renderer. Without storage, GetRenderState returns 0 for
+ * everything, causing lighting to reset to black on save game load. */
+#define D3DDEV_MAX_RENDERSTATE 256
+static DWORD g_render_states[D3DDEV_MAX_RENDERSTATE];
+
+#define D3DDEV_MAX_LIGHTSTATE 16
+static DWORD g_light_states[D3DDEV_MAX_LIGHTSTATE];
+
+#define D3DDEV_MAX_TEXSTAGES 8
+#define D3DDEV_MAX_TEXSTATE 64
+static DWORD g_texstage_states[D3DDEV_MAX_TEXSTAGES][D3DDEV_MAX_TEXSTATE];
+
 /* Forward declarations for D3D objects used by device stubs */
 static D3DObj g_d3d;
 typedef struct D3DVPObj D3DVPObj;
@@ -1107,10 +1120,46 @@ static HRESULT WINAPI D3DDev_BeginIndexed(void *s, void *a, void *b, void *c, vo
 static HRESULT WINAPI D3DDev_Vertex(void *s, void *a) { (void)s; (void)a; return DD_OK; }
 static HRESULT WINAPI D3DDev_Index(void *s, void *a) { (void)s; (void)a; return DD_OK; }
 static HRESULT WINAPI D3DDev_End(void *s, void *a) { (void)s; (void)a; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetRenderState(void *s, void *a, void *b) { (void)s; (void)a; if (b) *(DWORD*)b = 0; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetRenderState(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetLightState(void *s, void *a, void *b) { (void)s; (void)a; if (b) *(DWORD*)b = 0; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetLightState(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
+static HRESULT WINAPI D3DDev_GetRenderState(void *s, void *a, void *b) {
+    DWORD state = (DWORD)(DWORD_PTR)a;
+    (void)s;
+    if (b) {
+        *(DWORD*)b = (state < D3DDEV_MAX_RENDERSTATE) ? g_render_states[state] : 0;
+    }
+    rdd_log("D3DDev GetRenderState: state=%lu value=0x%lx",
+            (unsigned long)state, b ? (unsigned long)*(DWORD*)b : 0UL);
+    return DD_OK;
+}
+static HRESULT WINAPI D3DDev_SetRenderState(void *s, void *a, void *b) {
+    DWORD state = (DWORD)(DWORD_PTR)a;
+    DWORD value = (DWORD)(DWORD_PTR)b;
+    (void)s;
+    if (state < D3DDEV_MAX_RENDERSTATE)
+        g_render_states[state] = value;
+    rdd_log("D3DDev SetRenderState: state=%lu value=0x%lx",
+            (unsigned long)state, (unsigned long)value);
+    return DD_OK;
+}
+static HRESULT WINAPI D3DDev_GetLightState(void *s, void *a, void *b) {
+    DWORD state = (DWORD)(DWORD_PTR)a;
+    (void)s;
+    if (b) {
+        *(DWORD*)b = (state < D3DDEV_MAX_LIGHTSTATE) ? g_light_states[state] : 0;
+    }
+    rdd_log("D3DDev GetLightState: state=%lu value=0x%lx",
+            (unsigned long)state, b ? (unsigned long)*(DWORD*)b : 0UL);
+    return DD_OK;
+}
+static HRESULT WINAPI D3DDev_SetLightState(void *s, void *a, void *b) {
+    DWORD state = (DWORD)(DWORD_PTR)a;
+    DWORD value = (DWORD)(DWORD_PTR)b;
+    (void)s;
+    if (state < D3DDEV_MAX_LIGHTSTATE)
+        g_light_states[state] = value;
+    rdd_log("D3DDev SetLightState: state=%lu value=0x%lx",
+            (unsigned long)state, (unsigned long)value);
+    return DD_OK;
+}
 static HRESULT WINAPI D3DDev_SetTransform(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
 static HRESULT WINAPI D3DDev_GetTransform(void *s, void *a, void *b) {
     /* Return identity matrix (4x4 floats) */
@@ -1134,8 +1183,30 @@ static HRESULT WINAPI D3DDev_DrawIndexedPrimitiveVB(void *s, void *a, void *b, v
 static HRESULT WINAPI D3DDev_ComputeSphereVisibility(void *s, void *a, void *b, void *c, void *d, void *e) { (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
 static HRESULT WINAPI D3DDev_GetTexture(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
 static HRESULT WINAPI D3DDev_SetTexture(void *s, void *a, void *b) { (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetTextureStageState(void *s, void *a, void *b, void *c) { (void)s; (void)a; (void)b; if (c) *(DWORD*)c = 0; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetTextureStageState(void *s, void *a, void *b, void *c) { (void)s; (void)a; (void)b; (void)c; return DD_OK; }
+static HRESULT WINAPI D3DDev_GetTextureStageState(void *s, void *a, void *b, void *c) {
+    DWORD stage = (DWORD)(DWORD_PTR)a;
+    DWORD state = (DWORD)(DWORD_PTR)b;
+    (void)s;
+    if (c) {
+        *(DWORD*)c = (stage < D3DDEV_MAX_TEXSTAGES && state < D3DDEV_MAX_TEXSTATE)
+                     ? g_texstage_states[stage][state] : 0;
+    }
+    rdd_log("D3DDev GetTextureStageState: stage=%lu state=%lu value=0x%lx",
+            (unsigned long)stage, (unsigned long)state,
+            c ? (unsigned long)*(DWORD*)c : 0UL);
+    return DD_OK;
+}
+static HRESULT WINAPI D3DDev_SetTextureStageState(void *s, void *a, void *b, void *c) {
+    DWORD stage = (DWORD)(DWORD_PTR)a;
+    DWORD state = (DWORD)(DWORD_PTR)b;
+    DWORD value = (DWORD)(DWORD_PTR)c;
+    (void)s;
+    if (stage < D3DDEV_MAX_TEXSTAGES && state < D3DDEV_MAX_TEXSTATE)
+        g_texstage_states[stage][state] = value;
+    rdd_log("D3DDev SetTextureStageState: stage=%lu state=%lu value=0x%lx",
+            (unsigned long)stage, (unsigned long)state, (unsigned long)value);
+    return DD_OK;
+}
 static HRESULT WINAPI D3DDev_ValidateDevice(void *s, void *a) { rdd_log("D3DDev[41] ValidateDevice"); (void)s; (void)a; return DD_OK; }
 
 static void *g_d3ddev_vtbl[42] = {
@@ -1240,20 +1311,40 @@ static D3DVPObj g_d3dvp = { g_d3dvp_vtbl };
  * ================================================================ */
 
 typedef struct D3DMatObj D3DMatObj;
-struct D3DMatObj { void **lpVtbl; };
+/* D3DMATERIAL is 76 bytes. Store as raw bytes to avoid D3D type header dependency. */
+#define D3DMAT_DATA_SIZE 76
+struct D3DMatObj { void **lpVtbl; BYTE mat_data[D3DMAT_DATA_SIZE]; };
 
 static HRESULT WINAPI D3DMat_QI(D3DMatObj *s, REFIID r, void **o) { (void)s; (void)r; *o = NULL; return E_NOINTERFACE; }
 static ULONG WINAPI D3DMat_AddRef(D3DMatObj *s) { (void)s; return 2; }
 static ULONG WINAPI D3DMat_Release(D3DMatObj *s) { (void)s; return 1; }
+static HRESULT WINAPI D3DMat_SetMaterial(D3DMatObj *s, void *mat) {
+    if (mat) {
+        DWORD sz = *(DWORD*)mat;  /* dwSize is first field */
+        if (sz > D3DMAT_DATA_SIZE) sz = D3DMAT_DATA_SIZE;
+        memcpy(s->mat_data, mat, sz);
+        rdd_log("D3DMat_SetMaterial: copied %lu bytes", (unsigned long)sz);
+    }
+    return DD_OK;
+}
+static HRESULT WINAPI D3DMat_GetMaterial(D3DMatObj *s, void *mat) {
+    if (mat) {
+        DWORD sz = *(DWORD*)mat;  /* caller sets dwSize before calling */
+        if (sz == 0 || sz > D3DMAT_DATA_SIZE) sz = D3DMAT_DATA_SIZE;
+        memcpy(mat, s->mat_data, sz);
+        rdd_log("D3DMat_GetMaterial: returned %lu bytes", (unsigned long)sz);
+    }
+    return DD_OK;
+}
 
 static void *g_d3dmat_vtbl[6] = {
     D3DMat_QI, D3DMat_AddRef, D3DMat_Release,
-    d3dd_stub2,  /* 3 SetMaterial */
-    d3dd_stub2,  /* 4 GetMaterial */
-    d3dd_stub3   /* 5 GetHandle */
+    D3DMat_SetMaterial,  /* 3 SetMaterial */
+    D3DMat_GetMaterial,  /* 4 GetMaterial */
+    d3dd_stub3           /* 5 GetHandle */
 };
 
-static D3DMatObj g_d3dmat = { g_d3dmat_vtbl };
+static D3DMatObj g_d3dmat = { g_d3dmat_vtbl, {0} };
 
 /* ================================================================
  * Minimal IDirect3DLight stub (7 methods)
@@ -1262,20 +1353,40 @@ static D3DMatObj g_d3dmat = { g_d3dmat_vtbl };
  * ================================================================ */
 
 typedef struct D3DLightObj D3DLightObj;
-struct D3DLightObj { void **lpVtbl; };
+/* D3DLIGHT2 is 108 bytes. Store as raw bytes. */
+#define D3DLIGHT_DATA_SIZE 108
+struct D3DLightObj { void **lpVtbl; BYTE light_data[D3DLIGHT_DATA_SIZE]; };
 
 static HRESULT WINAPI D3DLight_QI(D3DLightObj *s, REFIID r, void **o) { (void)s; (void)r; *o = NULL; return E_NOINTERFACE; }
 static ULONG WINAPI D3DLight_AddRef(D3DLightObj *s) { (void)s; return 2; }
 static ULONG WINAPI D3DLight_Release(D3DLightObj *s) { (void)s; return 1; }
+static HRESULT WINAPI D3DLight_SetLight(D3DLightObj *s, void *light) {
+    if (light) {
+        DWORD sz = *(DWORD*)light;  /* dwSize is first field */
+        if (sz > D3DLIGHT_DATA_SIZE) sz = D3DLIGHT_DATA_SIZE;
+        memcpy(s->light_data, light, sz);
+        rdd_log("D3DLight_SetLight: copied %lu bytes", (unsigned long)sz);
+    }
+    return DD_OK;
+}
+static HRESULT WINAPI D3DLight_GetLight(D3DLightObj *s, void *light) {
+    if (light) {
+        DWORD sz = *(DWORD*)light;
+        if (sz == 0 || sz > D3DLIGHT_DATA_SIZE) sz = D3DLIGHT_DATA_SIZE;
+        memcpy(light, s->light_data, sz);
+        rdd_log("D3DLight_GetLight: returned %lu bytes", (unsigned long)sz);
+    }
+    return DD_OK;
+}
 
 static void *g_d3dlight_vtbl[6] = {
     D3DLight_QI, D3DLight_AddRef, D3DLight_Release,
-    d3dd_stub2,  /* 3 Initialize */
-    d3dd_stub2,  /* 4 SetLight */
-    d3dd_stub2   /* 5 GetLight */
+    d3dd_stub2,          /* 3 Initialize */
+    D3DLight_SetLight,   /* 4 SetLight */
+    D3DLight_GetLight    /* 5 GetLight */
 };
 
-static D3DLightObj g_d3dlight = { g_d3dlight_vtbl };
+static D3DLightObj g_d3dlight = { g_d3dlight_vtbl, {0} };
 
 /* IDirect3D3 methods */
 /* GUID for RGB software rasterizer (standard DirectX GUID) */
