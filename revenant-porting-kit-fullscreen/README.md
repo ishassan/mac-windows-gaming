@@ -31,7 +31,7 @@ The custom `ddraw.dll` (source: `patch/revenant_ddraw.c`) is a complete DirectDr
 - **Implements IDirectDraw4, IDirectDrawSurface4, IDirect3D3 (stub), IDirect3DDevice3 (stub).** These are the COM interfaces the game queries for during initialization.
 - **Manages its own pixel buffers.** The primary surface and back buffer are allocated as plain memory buffers at 640x480x16 in RGB565 format. The game locks these surfaces, writes pixels, and unlocks them, just as it would with real DirectDraw surfaces.
 - **Presents frames via StretchDIBits.** On every `Blt` call that targets the primary surface, the DLL converts the RGB565 pixel data to RGB8888 using a precomputed lookup table, then calls `StretchDIBits` to scale the 640x480 image to fill the game window. The HALFTONE stretch mode provides smooth scaling.
-- **Provides minimal D3D stubs.** The game queries `IDirectDraw4` for `IDirect3D3`, then creates a `IDirect3DDevice3` and `IDirect3DViewport3`. These are all stubbed to return success so the game passes its initialization checks without actually using hardware 3D.
+- **Provides D3D stubs with texture support.** The game queries `IDirectDraw4` for `IDirect3D3`, then creates a `IDirect3DDevice3` and `IDirect3DViewport3`. The D3D device reports texture capabilities (RGB565, up to 1024x1024) so the game's texture loading pipeline succeeds. The device tracks its render target surface and returns it via `GetRenderTarget`.
 - **Implements GetDC/ReleaseDC.** The game uses `GetDC` on surfaces to draw text via GDI (for menus and UI). The custom implementation creates a temporary 32-bit DIB section, copies the RGB565 surface data into it, hands the DC to the game, then copies the modified pixels back on `ReleaseDC`.
 - **Implements IDirect3DTexture2.** Surfaces can be queried for the texture interface. The implementation provides `GetHandle` (returns a handle based on the surface pointer) and `Load` (copies pixel data between texture surfaces).
 
@@ -93,9 +93,13 @@ Launch the game from Porting Kit or double-click `Revenant.app` in `~/Applicatio
 
 The game renders at 640x480 and the custom DLL scales the output to fill the entire screen. The intro cinematics and main menu will display in fullscreen.
 
-## Known Limitations
+## Current State
 
-- **Texture loading fails when starting New Game.** The game's 3D renderer requires a more complete D3D device implementation than what the current stubs provide. The game's menu and cinematics work, but starting actual gameplay fails with "Unable to load tormar texture". This happens because the D3D device stubs do not fully implement the texture management pipeline the game's software renderer expects.
+The game launches, renders menus and cinematics in fullscreen, and gameplay loads successfully. The 3D viewport renders with characters, environments, and UI elements visible. The following issues remain:
+
+- **Pink/magenta rendering artifacts.** Some UI regions (HUD corners, inventory panel edges) render with bright pink (RGB 255,0,255) instead of transparency. This is the standard color key value the game uses for transparent regions. The custom DLL's `Blt`/`BltFast` implementation does not yet handle source color key transparency (`DDBLT_KEYSRC` / `DDBLTFAST_SRCCOLORKEY`), so pixels that should be transparent are drawn as solid magenta.
+- **Save game menu does not open.** During gameplay, pressing Escape and clicking "Save Game" does not open the save dialog. This is likely caused by the DLL not handling a child surface, overlay, or dialog-related DirectDraw call that the save UI depends on.
+- **Exit game freezes.** During gameplay, pressing Escape and clicking "Exit Game" freezes the game instead of exiting cleanly. This may be caused by a missing or broken `RestoreDisplayMode`, `SetCooperativeLevel(NORMAL)`, or window message handling during shutdown.
 - **Aspect ratio.** The game's 4:3 content is stretched to fill the screen. If the display is 16:10 or wider, there will be slight horizontal stretching.
 - **No Flip-based rendering.** The game uses `Blt` (not `Flip`) to present frames. The fullscreen scaling triggers on every `Blt` to the primary surface.
 
@@ -144,16 +148,16 @@ When the game calls `SetDisplayMode(640, 480, 16)`, the custom DLL does not actu
 The game queries `IDirectDraw4` for `IDirect3D3` during initialization. From there, it creates a `IDirect3DDevice3` (a HAL or RGB software device) and a `IDirect3DViewport3`. These interfaces are stubbed:
 
 - **IDirect3D3** (13 methods): `QueryInterface`, `AddRef`, `Release`, `EnumDevices` (calls the callback with a fake "HAL" device), `CreateDevice`, `CreateViewport`, and others returning `DD_OK` or `D3D_OK`.
-- **IDirect3DDevice3** (50 methods): Most methods return `D3D_OK` as no-ops. `GetDirect3D` returns the D3D3 object. `SetRenderState` and `SetTextureStageState` are logged but otherwise ignored.
+- **IDirect3DDevice3** (50 methods): Most methods return `D3D_OK` as no-ops. `GetCaps` reports texture and rendering capabilities (RGB565, texture sizes 1x1 to 1024x1024). `GetRenderTarget` / `SetRenderTarget` track the active render target surface. `GetDirect3D` returns the D3D3 object. `SetRenderState` and `SetTextureStageState` are logged but otherwise ignored.
 - **IDirect3DViewport3** (20 methods): `SetViewport2` stores viewport parameters. Other methods return `D3D_OK`.
 
-These stubs exist because the game checks for D3D device availability during initialization, even though it ultimately uses its own software renderer for the 3D viewport. Without these stubs, the game fails with "This game requires DirectX 6.0 or higher."
+These stubs exist because the game checks for D3D device availability and texture capabilities during initialization. Without these stubs, the game fails with "This game requires DirectX 6.0 or higher." The device capability reporting is also critical for texture loading: the game checks `D3DDEVICEDESC.dpcTriCaps.dwTextureCaps` to confirm texture support before loading game assets.
 
 ### IDirect3DTexture2 and Texture Handle Management
 
 Surfaces created with `DDSCAPS_TEXTURE` can be queried for the `IDirect3DTexture2` interface. The implementation:
 
 - **GetHandle:** Returns a handle derived from the surface pointer. The game uses these handles in `SetRenderState(D3DRENDERSTATE_TEXTUREHANDLE, ...)` calls.
-- **Load:** Copies pixel data from one texture surface to another (same dimensions required). This is used by the game to upload texture data to "device" textures.
+- **Load:** Copies pixel data from one texture surface to another row-by-row, handling pitch mismatches between source and destination surfaces. This is used by the game to upload texture data to "device" textures.
 
-A pool of up to 64 texture objects is maintained (`g_tex_pool`), mapping surfaces to their texture interface wrappers.
+A pool of up to 512 texture objects is maintained (`g_tex_pool`), mapping surfaces to their texture interface wrappers.

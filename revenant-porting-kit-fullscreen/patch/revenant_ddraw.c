@@ -129,6 +129,7 @@ static ULONG g_dd_refcount = 0;
 static DD4Obj g_dd4;
 static DD1Obj g_dd1;
 static BOOL g_initialized = FALSE;
+static RDDSurface *g_render_target = NULL;
 
 /* ================================================================
  * Presentation: RGB565 LUT + StretchDIBits
@@ -217,7 +218,7 @@ static void fill_surface_desc(RDDSurface *surf, DDSURFACEDESC2 *desc) {
 /* Forward-declared vtable instance */
 static RDDSurfaceVtbl g_surf_vtbl;
 
-static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDPIXELFORMAT *pf) {
+static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDPIXELFORMAT *pf, DWORD req_caps) {
     RDDSurface *s = (RDDSurface *)calloc(1, sizeof(RDDSurface));
     if (!s) return NULL;
     s->lpVtbl = &g_surf_vtbl;
@@ -242,7 +243,7 @@ static RDDSurface *alloc_surface(SurfType type, DWORD w, DWORD h, DWORD bpp, DDP
         s->caps = DDSCAPS_BACKBUFFER | DDSCAPS_FLIP | DDSCAPS_COMPLEX;
         break;
     case SURF_OFFSCREEN:
-        s->caps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY;
+        s->caps = req_caps ? req_caps : (DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY);
         break;
     }
 
@@ -279,11 +280,20 @@ static HRESULT WINAPI D3DTex_Load(D3DTexObj *s, void *src_tex) {
         D3DTexObj *src = (D3DTexObj *)src_tex;
         if (src->surf && s->surf &&
             src->surf->width == s->surf->width &&
-            src->surf->height == s->surf->height &&
-            src->surf->pitch == s->surf->pitch) {
-            memcpy(s->surf->pixels, src->surf->pixels,
-                   (size_t)(s->surf->pitch * s->surf->height));
-            rdd_log("D3DTex_Load: copied %lux%lu pixels", s->surf->width, s->surf->height);
+            src->surf->height == s->surf->height) {
+            /* Copy row-by-row to handle pitch mismatches between surfaces */
+            DWORD y;
+            LONG row_bytes = (LONG)(s->surf->width * (s->surf->bpp / 8));
+            for (y = 0; y < s->surf->height; y++) {
+                memcpy(s->surf->pixels + y * s->surf->pitch,
+                       src->surf->pixels + y * src->surf->pitch,
+                       (size_t)row_bytes);
+            }
+            rdd_log("D3DTex_Load: copied %lux%lu pixels (src_pitch=%ld dst_pitch=%ld)",
+                    s->surf->width, s->surf->height, src->surf->pitch, s->surf->pitch);
+        } else if (src->surf && s->surf) {
+            rdd_log("D3DTex_Load: dimension mismatch dst=%lux%lu src=%lux%lu",
+                    s->surf->width, s->surf->height, src->surf->width, src->surf->height);
         }
     }
     return DD_OK;
@@ -297,7 +307,7 @@ static void *g_d3dtex_vtbl[6] = {
 };
 
 /* Pool of texture objects (surfaces can be QI'd for texture) */
-#define MAX_TEX_OBJS 64
+#define MAX_TEX_OBJS 512
 static D3DTexObj g_tex_pool[MAX_TEX_OBJS];
 static int g_tex_count = 0;
 
@@ -311,6 +321,7 @@ static D3DTexObj *get_tex_for_surface(RDDSurface *surf) {
         t->surf = surf;
         return t;
     }
+    rdd_log("ERROR: texture pool exhausted (%d/%d)", g_tex_count, MAX_TEX_OBJS);
     return NULL;
 }
 
@@ -850,14 +861,74 @@ static HRESULT WINAPI D3DDev_QueryInterface(D3DDevObj *self, REFIID riid, void *
 static ULONG WINAPI D3DDev_AddRef(D3DDevObj *self) { (void)self; return 2; }
 static ULONG WINAPI D3DDev_Release(D3DDevObj *self) { (void)self; return 1; }
 
+/* Fill a D3DDEVICEDESC (252 bytes / 63 DWORDs) with software renderer caps.
+ * Layout:
+ *   d[0]=dwSize  d[1]=dwFlags  d[2]=dcmColorModel  d[3]=dwDevCaps
+ *   d[4..5]=dtcTransformCaps  d[6]=bClipping  d[7..10]=dlcLightingCaps
+ *   d[11..24]=dpcLineCaps (D3DPRIMCAPS, 14 DWORDs)
+ *   d[25..38]=dpcTriCaps  d[39]=dwDeviceRenderBitDepth  d[40]=dwDeviceZBufferBitDepth
+ *   d[41]=dwMaxBufferSize  d[42]=dwMaxVertexCount
+ *   d[43..44]=minTex WxH  d[45..46]=maxTex WxH  d[47..50]=stipple min/max
+ *   d[51]=maxTexRepeat  d[52]=maxTexAspect  d[53]=maxAniso
+ *   d[54..58]=guard band + extentsAdjust (floats)
+ *   d[59]=stencilCaps  d[60]=fvfCaps  d[61]=texOpCaps
+ *   d[62]=wMaxTexBlendStages(lo) | wMaxSimTextures(hi)
+ */
+static void fill_d3d_device_desc(void *desc) {
+    DWORD *d = (DWORD *)desc;
+    memset(d, 0, 252);
+
+    d[0]  = 252;       /* dwSize */
+    d[1]  = 0x7FF;     /* dwFlags: all capability fields valid */
+    d[2]  = 1;         /* dcmColorModel: D3DCOLOR_RGB */
+    d[3]  = 0x00000110 /* TEXTURESYSTEMMEMORY(0x100) | EXECUTESYSTEMMEMORY(0x10) */
+          | 0x00000440;/* DRAWPRIMTLVERTEX(0x400) | TLVERTEXSYSTEMMEMORY(0x40) */
+    d[4]  = 8;         /* dtcTransformCaps.dwSize */
+    d[5]  = 1;         /* dtcTransformCaps.dwCaps: D3DTRANSFORMCAPS_CLIP */
+    d[6]  = 1;         /* bClipping = TRUE */
+    d[7]  = 16;        /* dlcLightingCaps.dwSize */
+    d[8]  = 0x1F;      /* dlcLightingCaps.dwCaps: all light types */
+    d[9]  = 1;         /* dlcLightingCaps.dwLightingModel: RGB */
+    d[10] = 8;         /* dlcLightingCaps.dwNumLights */
+
+    /* dpcLineCaps (d[11..24]) and dpcTriCaps (d[25..38]) - D3DPRIMCAPS, 14 DWORDs each */
+    /* Fill both identically */
+    {
+        int base;
+        for (base = 11; base <= 25; base += 14) {
+            d[base+0]  = 56;       /* dwSize */
+            d[base+1]  = 0x70;     /* dwMiscCaps: CULLNONE|CULLCW|CULLCCW */
+            d[base+2]  = 0x21;     /* dwRasterCaps: DITHER | SUBPIXEL */
+            d[base+3]  = 0xFF;     /* dwZCmpCaps: all compare functions */
+            d[base+4]  = 0x1FFF;   /* dwSrcBlendCaps */
+            d[base+5]  = 0x1FFF;   /* dwDestBlendCaps */
+            d[base+6]  = 0xFF;     /* dwAlphaCmpCaps */
+            d[base+7]  = 0x03FCFC; /* dwShadeCaps: gouraud + flat + specular */
+            d[base+8]  = 0x0D;     /* dwTextureCaps: PERSPECTIVE|ALPHA|TRANSPARENCY */
+            d[base+9]  = 0x0703;   /* dwTextureFilterCaps: nearest + linear + mip */
+            d[base+10] = 0x07;     /* dwTextureBlendCaps: decal + modulate + add */
+            d[base+11] = 0x03;     /* dwTextureAddressCaps: wrap + mirror */
+        }
+    }
+
+    d[39] = 0x0400;    /* dwDeviceRenderBitDepth: DDBD_16 */
+    d[40] = 0x0400;    /* dwDeviceZBufferBitDepth: DDBD_16 */
+    d[42] = 65536;     /* dwMaxVertexCount */
+    d[43] = 1;         /* dwMinTextureWidth */
+    d[44] = 1;         /* dwMinTextureHeight */
+    d[45] = 1024;      /* dwMaxTextureWidth */
+    d[46] = 1024;      /* dwMaxTextureHeight */
+    d[51] = 1024;      /* dwMaxTextureRepeat */
+    d[52] = 1024;      /* dwMaxTextureAspectRatio */
+    d[53] = 1;         /* dwMaxAnisotropy */
+}
+
 /* Individual device stubs with logging */
 static HRESULT WINAPI D3DDev_GetCaps(void *s, void *hal, void *hel) {
     rdd_log("D3DDev[3] GetCaps");
     (void)s;
-    /* Zero-fill both D3DDEVICEDESC structs and set dwSize.
-     * The game reads these to determine renderer capabilities. */
-    if (hal) { memset(hal, 0, 252); *(DWORD*)hal = 252; }
-    if (hel) { memset(hel, 0, 252); *(DWORD*)hel = 252; }
+    if (hal) fill_d3d_device_desc(hal);
+    if (hel) fill_d3d_device_desc(hel);
     return DD_OK;
 }
 static HRESULT WINAPI D3DDev_GetStats(void *s, void *a) { (void)s; if (a) memset(a, 0, 36); return DD_OK; }
@@ -920,8 +991,26 @@ static HRESULT WINAPI D3DDev_EndScene(void *s) { rdd_log("D3DDev[10] EndScene");
 static HRESULT WINAPI D3DDev_GetDirect3D(void *s, void **out) { rdd_log("D3DDev[11] GetDirect3D"); (void)s; *out = &g_d3d; return DD_OK; }
 static HRESULT WINAPI D3DDev_SetCurrentViewport(void *s, void *a) { rdd_log("D3DDev[12] SetCurrentViewport"); (void)s; (void)a; return DD_OK; }
 static HRESULT WINAPI D3DDev_GetCurrentViewport(void *s, void **out) { rdd_log("D3DDev[13] GetCurrentViewport"); (void)s; *out = &g_d3dvp; return DD_OK; }
-static HRESULT WINAPI D3DDev_SetRenderTarget(void *s, void *a, void *b) { rdd_log("D3DDev[14] SetRenderTarget"); (void)s; (void)a; (void)b; return DD_OK; }
-static HRESULT WINAPI D3DDev_GetRenderTarget(void *s, void **out) { rdd_log("D3DDev[15] GetRenderTarget"); (void)s; *out = NULL; return DD_OK; }
+static HRESULT WINAPI D3DDev_SetRenderTarget(void *s, void *a, void *b) {
+    (void)s; (void)b;
+    if (a) g_render_target = (RDDSurface *)a;
+    rdd_log("D3DDev[14] SetRenderTarget: rt=%p", a);
+    return DD_OK;
+}
+static HRESULT WINAPI D3DDev_GetRenderTarget(void *s, void **out) {
+    (void)s;
+    if (g_render_target) {
+        g_render_target->refcount++;
+        *out = g_render_target;
+    } else if (g_primary && g_primary->back_buffer) {
+        g_primary->back_buffer->refcount++;
+        *out = g_primary->back_buffer;
+    } else {
+        *out = NULL;
+    }
+    rdd_log("D3DDev[15] GetRenderTarget: rt=%p", *out);
+    return DD_OK;
+}
 static HRESULT WINAPI D3DDev_Begin(void *s, void *a, void *b, void *c) { rdd_log("D3DDev[16] Begin"); (void)s; (void)a; (void)b; (void)c; return DD_OK; }
 static HRESULT WINAPI D3DDev_BeginIndexed(void *s, void *a, void *b, void *c, void *d, void *e) { rdd_log("D3DDev[17] BeginIndexed"); (void)s; (void)a; (void)b; (void)c; (void)d; (void)e; return DD_OK; }
 static HRESULT WINAPI D3DDev_Vertex(void *s, void *a) { (void)s; (void)a; return DD_OK; }
@@ -1107,15 +1196,11 @@ static HRESULT WINAPI D3D_EnumDevices(D3DObj *s, void *cb_raw, void *ctx) {
      * The game needs this to initialize its 3D renderer. */
     typedef HRESULT (WINAPI *EnumDevCB)(GUID*, char*, char*, void*, void*, void*);
     EnumDevCB cb = (EnumDevCB)cb_raw;
-    /* D3DDEVICEDESC for HAL and HEL (software) - zero-filled is OK for software device */
-    char hal_desc[252]; /* D3DDEVICEDESC size */
+    char hal_desc[252];
     char hel_desc[252];
     (void)s;
-    memset(hal_desc, 0, sizeof(hal_desc));
-    memset(hel_desc, 0, sizeof(hel_desc));
-    /* Set dwSize fields (first DWORD in D3DDEVICEDESC) */
-    *(DWORD*)hal_desc = 252;
-    *(DWORD*)hel_desc = 252;
+    fill_d3d_device_desc(hal_desc);
+    fill_d3d_device_desc(hel_desc);
     rdd_log("D3D_EnumDevices: calling callback with RGB device");
     if (cb) cb((GUID*)&MY_IID_IDirect3DRGBDevice,
                "RGB Emulation", "Direct3D RGB Software Emulation",
@@ -1132,8 +1217,9 @@ static HRESULT WINAPI D3D_CreateViewport(D3DObj *s, void **v, void *o) {
 }
 static HRESULT WINAPI D3D_FindDevice(D3DObj *s, void *search, void *result) { rdd_log("D3D_FindDevice"); (void)s; (void)search; (void)result; return DDERR_UNSUPPORTED; }
 static HRESULT WINAPI D3D_CreateDevice(D3DObj *s, REFCLSID c, void *surf, void **dev, void *o) {
-    (void)s; (void)c; (void)surf; (void)o;
-    rdd_log("D3D_CreateDevice: returning stub device");
+    (void)s; (void)c; (void)o;
+    if (surf) g_render_target = (RDDSurface *)surf;
+    rdd_log("D3D_CreateDevice: returning stub device, rt=%p", surf);
     *dev = &g_d3ddev;
     return DD_OK;
 }
@@ -1448,8 +1534,8 @@ static HRESULT WINAPI DD4_CreateSurface(DD4Obj *self, LPDDSURFACEDESC2 desc,
             desc->dwFlags, caps, desc->dwWidth, desc->dwHeight, desc->dwBackBufferCount);
 
     if (caps & DDSCAPS_PRIMARYSURFACE) {
-        RDDSurface *primary = alloc_surface(SURF_PRIMARY, 640, 480, 16, NULL);
-        RDDSurface *backbuf = alloc_surface(SURF_BACKBUFFER, 640, 480, 16, NULL);
+        RDDSurface *primary = alloc_surface(SURF_PRIMARY, 640, 480, 16, NULL, 0);
+        RDDSurface *backbuf = alloc_surface(SURF_BACKBUFFER, 640, 480, 16, NULL, 0);
         if (!primary || !backbuf) {
             if (primary) { free(primary->pixels); free(primary); }
             if (backbuf) { free(backbuf->pixels); free(backbuf); }
@@ -1462,11 +1548,15 @@ static HRESULT WINAPI DD4_CreateSurface(DD4Obj *self, LPDDSURFACEDESC2 desc,
         return DD_OK;
     }
 
-    if ((caps & DDSCAPS_OFFSCREENPLAIN) || (caps & DDSCAPS_ZBUFFER) || (caps & DDSCAPS_TEXTURE)) {
+    if ((caps & DDSCAPS_OFFSCREENPLAIN) || (caps & DDSCAPS_ZBUFFER) ||
+        (caps & DDSCAPS_TEXTURE) || (caps & DDSCAPS_3DDEVICE)) {
         DWORD w = desc->dwWidth;
         DWORD h = desc->dwHeight;
         DWORD bpp = 16;
-        const char *kind = (caps & DDSCAPS_ZBUFFER) ? "zbuffer" : (caps & DDSCAPS_TEXTURE) ? "texture" : "offscreen";
+        const char *kind = (caps & DDSCAPS_ZBUFFER) ? "zbuffer"
+                         : (caps & DDSCAPS_TEXTURE) ? "texture"
+                         : (caps & DDSCAPS_3DDEVICE) ? "3ddevice"
+                         : "offscreen";
         if (w == 0) w = 640;
         if (h == 0) h = 480;
         /* Use the requested pixel format's bit depth */
@@ -1486,7 +1576,7 @@ static HRESULT WINAPI DD4_CreateSurface(DD4Obj *self, LPDDSURFACEDESC2 desc,
         }
         {
         DDPIXELFORMAT *fmt = (desc->dwFlags & DDSD_PIXELFORMAT) ? &desc->ddpfPixelFormat : NULL;
-        *out = alloc_surface(SURF_OFFSCREEN, w, h, bpp, fmt);
+        *out = alloc_surface(SURF_OFFSCREEN, w, h, bpp, fmt, caps);
         }
         if (!*out) return DDERR_OUTOFMEMORY;
         rdd_log("DD4_CreateSurface: created %s %lux%lux%lu", kind, w, h, bpp);
