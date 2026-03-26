@@ -1,0 +1,12 @@
+loc_651D90,_CIsin_asm2c
+loc_651EC0,_CIcos_asm2c
+loc_652C10,_CItan_asm2c
+loc_651860,_CIatan_asm2c
+loc_652490,_CIacos_asm2c
+loc_655AD0,_CIasin_asm2c
+loc_651160,_CIsqrt_asm2c
+loc_652610,_CIpow_asm2c
+loc_656210,_CIlog10_asm2c
+loc_652200,ceil_asm2c
+loc_652320,floor_asm2c
+loc_6519C0,_ftol2_sse_asm2c
