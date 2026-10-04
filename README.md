@@ -63,6 +63,7 @@ options of that game.
 - [M-HT/SR](https://github.com/M-HT/SR) (static recompiler) and the parts of
   the runtime that come from its Septerra Core port: Copyright (C) Roman Pauer,
   MIT license.
-- The other files in this repository: MIT license.
+- The other files in this repository: MIT license, Copyright (c) 2026 Islam
+  Hassan (see [LICENSE](LICENSE)).
 - The games belong to their owners: Commandos (Pyro Studios), Revenant
   (Cinematix Studios, Eidos Interactive).

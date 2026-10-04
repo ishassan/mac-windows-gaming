@@ -60,6 +60,10 @@ Saves go to `User/Pyro Studios/Commandos/OUTPUT/` in the game folder.
 
 ## Build
 
+The port supports the GOG `comandos.exe` (sha256 `349fab97...0dd7`,
+`GAME_EXE_SHA256` in `game.conf`). The build stops for another version,
+because the fixes in `srw/` use its fixed addresses.
+
 From the repository root (once): `conda env create -f environment.yml`,
 `. common/tools/env.sh`, `common/tools/install-ldc.sh`. Then:
 
@@ -123,5 +127,5 @@ shared: see [common/README.md](../common/README.md).
 ## License and credits
 
 - M-HT/SR and the runtime files from its Septerra Core port: Copyright (C) Roman Pauer, MIT license.
-- The files in this folder: MIT license.
+- The files in this folder: MIT license (see [LICENSE](../LICENSE)).
 - *Commandos: Behind Enemy Lines* is a game by Pyro Studios. You need your own copy.

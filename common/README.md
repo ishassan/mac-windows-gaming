@@ -30,7 +30,9 @@ include $(COMMON)/mk/game.mk
 ```
 
 `game.conf` (KEY=value) gives `GAME_NAME` (program name), `GAME_EXE` (exe in
-the game folder), `GAME_LLASM` (SRW output name), `GAME_DIR_DEFAULT` (game
+the game folder), `GAME_EXE_SHA256` (the exe version that the port supports:
+the build stops for another version, because the fixes in `srw/` use fixed
+addresses), `GAME_LLASM` (SRW output name), `GAME_DIR_DEFAULT` (game
 folder, relative to `$HOME`), `APP_NAME` and `APP_ICON_SOURCE` (for the app
 bundle) and optional `EXTRA_DYLIBS`.
 

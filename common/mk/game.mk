@@ -5,7 +5,8 @@
 #     include $(COMMON)/mk/game.mk
 # and these files:
 #     game.conf        GAME_NAME (program name), GAME_EXE (exe in the game
-#                      folder), GAME_LLASM (name of the SRW output),
+#                      folder), GAME_EXE_SHA256 (the supported exe version),
+#                      GAME_LLASM (name of the SRW output),
 #                      GAME_DIR_DEFAULT (relative to $HOME)
 #     runtime/game.h   values for the shared runtime (common/runtime/game-info.h)
 #     srw/             SR.cfg, llasm/*.sci; optional jump_tables.txt,
@@ -100,8 +101,18 @@ $(GEN)/imports.spec: $(SPEC_SRC)
 	cat $(SPEC_SRC) > $@
 
 # 1. Translate the exe (SRW) -> build/gen/*.llasm
+# The fixes in srw/ use fixed addresses of one exe version: GAME_EXE_SHA256
+# in game.conf is that version. Another version stops the build here.
 $(B)/srw/$(GAME_EXE):
 	mkdir -p $(B)/srw
+	@sum=$$(shasum -a 256 "$(GAME_DIR)/$(GAME_EXE)" | cut -d' ' -f1); \
+	if [ -n "$(GAME_EXE_SHA256)" ] && [ "$$sum" != "$(GAME_EXE_SHA256)" ]; then \
+	  echo "error: $(GAME_DIR)/$(GAME_EXE) is not the exe version that this port supports." >&2; \
+	  echo "  sha256 found:    $$sum" >&2; \
+	  echo "  sha256 expected: $(GAME_EXE_SHA256) (GAME_EXE_SHA256 in game.conf)" >&2; \
+	  echo "  The fixes in srw/ are for that version only (see the README of the game)." >&2; \
+	  exit 1; \
+	fi
 	cp "$(GAME_DIR)/$(GAME_EXE)" $@
 
 $(GEN)/$(GAME_LLASM).llasm: $(B)/srw/$(GAME_EXE) $(TOOLS)/gen_relocs.py $(TOOLS)/gen_extern.py $(TOOLS)/run-srw.sh \

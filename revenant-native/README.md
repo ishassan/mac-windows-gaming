@@ -72,7 +72,9 @@ make                             # reads Revenant.exe from ~/Games/Revenant
 
 ## Port notes
 
-These findings are specific to `Revenant.exe` (they are in `srw/`):
+These findings are specific to the GOG `Revenant.exe` version 1.22
+(sha256 `28bec273...72b5`, `GAME_EXE_SHA256` in `game.conf`; the build
+stops for another version). They are in `srw/`:
 
 - `srw/data_in_text.txt`: the DirectInput data format `c_dfDIJoystick` is
   linked into `.text` at `0x58a3b0`.
@@ -97,6 +99,6 @@ These findings are specific to `Revenant.exe` (they are in `srw/`):
 ## License and credits
 
 - M-HT/SR: Copyright (C) Roman Pauer, MIT license.
-- The files in this folder: MIT license.
+- The files in this folder: MIT license (see [LICENSE](../LICENSE)).
 - *Revenant* is a game by Cinematix Studios, published by Eidos Interactive.
   You need your own copy.
