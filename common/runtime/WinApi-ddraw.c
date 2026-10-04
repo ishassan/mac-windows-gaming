@@ -328,9 +328,14 @@ static void save_shot(void)
 static int primary_dirty;
 static Uint32 last_present;
 
+EXTERN_C void LagTrace_Present(Uint64 t_start, Uint64 t_upload, Uint64 t_end);
+
 static void present_now(void)
 {
+    Uint64 t_start, t_upload;
+
     if (primary == NULL || renderer == NULL || texture == NULL) return;
+    t_start = SDL_GetPerformanceCounter();
     primary_dirty = 0;
     last_present = SDL_GetTicks();
     convert_to_frame(primary);
@@ -341,24 +346,28 @@ static void present_now(void)
     SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, texture, NULL, NULL);
     display_virtual_keyboard(renderer);
+    t_upload = SDL_GetPerformanceCounter();
     SDL_RenderPresent(renderer);
+    LagTrace_Present(t_start, t_upload, SDL_GetPerformanceCounter());
     if (Display_DelayAfterFlip > 0) SDL_Delay(Display_DelayAfterFlip);
 }
 
 /* The game writes to the primary surface several times per frame (Blt,
- * BltFast, Unlock). Each SDL present waits for the display refresh, so
- * those writes only mark the screen as changed; it is shown at most once
- * per refresh, at the next write after 15 ms or when the game reads its
- * messages (DDraw_PresentIfDirty). Flip shows the screen at once. */
+ * BltFast, Unlock), and Commandos draws its cursor there at each mouse
+ * move. A present costs some ms (and waits for the display refresh with
+ * VSync), so those writes only mark the screen as changed; it is shown at
+ * most once in 16 ms (about 60 times a second), at the next write or when
+ * the game reads its messages (DDraw_PresentIfDirty). Flip shows the
+ * screen at once. */
 static void present_primary(void)
 {
     primary_dirty = 1;
-    if (SDL_GetTicks() - last_present >= 15) present_now();
+    if (SDL_GetTicks() - last_present >= 16) present_now();
 }
 
 EXTERN_C void DDraw_PresentIfDirty(void)
 {
-    if (primary_dirty) present_now();
+    if (primary_dirty && SDL_GetTicks() - last_present >= 16) present_now();
 }
 
 /* ------------------------------------------------------------------ surfaces */

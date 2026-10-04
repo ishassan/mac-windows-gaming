@@ -73,7 +73,12 @@ void ReadConfiguration(int argc, char *argv[])
     Intro_Play = 1;
 
     Display_Mode = GAME_DISPLAY_MODE;
-    Display_VSync = 1;
+    // Port change: no VSync by default. Commandos draws its cursor on the
+    // screen at each mouse move; with VSync each of those presents waited
+    // for the display refresh (about 15 ms), the game spent most of its
+    // time there, and the camera and the keys lagged. "VSync=on" in the
+    // config file turns it on again.
+    Display_VSync = 0;
     Display_Width = 0;
     Display_Height = 0;
     Display_Resizable = 0;

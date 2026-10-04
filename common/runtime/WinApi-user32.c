@@ -458,8 +458,12 @@ void init_sleepmode(void)
 }
 #endif
 
+extern "C" void LagTrace_Warp(void);
+extern "C" void LagTrace_Event(const SDL_Event *event);
+
 static void warp_mouse(int x, int y)
 {
+    LagTrace_Warp();
     if (mouse_renderer != NULL)
     {
 #if SDL_VERSION_ATLEAST(2,0,18)
@@ -1099,6 +1103,7 @@ static int find_event(SDL_Event *event, int remove, int wait)
         {
         case SDL_KEYDOWN:
         case SDL_KEYUP:
+            if (remove) LagTrace_Event(event);
             if (event->type == SDL_KEYDOWN && game_getenv("TRACE_MSG"))
             {
                 eprintf("key down: sym 0x%x mod 0x%x\n", (unsigned)event->key.keysym.sym, (unsigned)event->key.keysym.mod);
@@ -1172,6 +1177,7 @@ static int find_event(SDL_Event *event, int remove, int wait)
 
         case SDL_MOUSEMOTION:
             // mouse motion events
+            if (remove) LagTrace_Event(event);
             if (!virtual_keyboard_state)
             {
                 keep_event = 1;

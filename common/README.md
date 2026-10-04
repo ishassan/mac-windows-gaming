@@ -74,6 +74,7 @@ becomes a trap, listed in `build/srw/srw-traps.txt`), and stages the output.
 | `WinApi-smackw32.c` | Smacker video decoder and player. |
 | `WinApi-amstream.c`, `video-avi.c` | DirectShow multimedia stream: AVI with Cinepak and MS ADPCM. |
 | `WinApi-winmm.c`, `WinApi-misc.c` | winmm timers, COM, registry, shell functions. |
+| `lag-trace.c` | The `TRACE_LAG` measurements. |
 | `imports.spec` | One line per imported function: return type, name, parameters (`*` marks a pointer). |
 | `com/*.com` | COM interface lists in vtable order. |
 | `llasm/` | The llasm support code of M-HT/SR and the native replacements for C runtime functions. |
@@ -87,6 +88,11 @@ screen at the desktop size; 2 full screen with a display mode change). The
 player can change it with `Display_Mode=window`, `desktop` or `fullscreen`
 in the game's config file (`GAME_CONFIG_FILE` in `game.h`, in the game
 folder), which `runtime/Game-Config.c` reads.
+
+**VSync.** Off by default: with VSync, each screen update waits for the
+display refresh, and Commandos updates the screen at each mouse move (the
+camera and the keys then lag). `VSync=on` in the same config file turns it
+on. The screen is updated at most about 60 times a second.
 
 **Environment variables.** The prefix is the game's `GAME_ENV_PREFIX` (for
 example `REVENANT_`).
@@ -103,6 +109,7 @@ example `REVENANT_`).
 | `<P>TRACE_GDI=1` | Fonts and text. |
 | `<P>TRACE_DDRAW=1`, `<P>TRACE_D3D=1` or `2` | DirectDraw and Direct3D calls. |
 | `<P>TRACE_DINPUT=1`, `<P>TRACE_SYNC=1`, `<P>TRACE_TIME=1` | DirectInput, sync objects, `Sleep` statistics. |
+| `<P>TRACE_LAG=1` | Once a second: game frames, game work time, screen updates and the time they block, mouse moves, key delay. Also a "slow" line for each event above its limit (`runtime/lag-trace.c`). |
 
 On a crash, the program prints the host and guest registers and a guest stack
 trace (only the first entry is always correct).

@@ -2002,7 +2002,20 @@ uint32_t CCALL SetThreadPriority_c(void *hThread, int32_t nPriority)
     return 1;
 }
 
+extern "C" void LagTrace_SleepBegin(uint32_t ms, uint64_t *t_begin);
+extern "C" void LagTrace_SleepEnd(uint32_t ms, uint64_t t_begin);
+
+static void Sleep_real(uint32_t cMilliseconds);
+
 void CCALL Sleep_c(uint32_t cMilliseconds)
+{
+    uint64_t t_begin = 0;
+    LagTrace_SleepBegin(cMilliseconds, &t_begin);
+    Sleep_real(cMilliseconds);
+    LagTrace_SleepEnd(cMilliseconds, t_begin);
+}
+
+static void Sleep_real(uint32_t cMilliseconds)
 {
 #ifdef DEBUG_KERNEL32
     eprintf("Sleep: %i\n", cMilliseconds);
