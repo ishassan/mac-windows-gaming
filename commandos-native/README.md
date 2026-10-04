@@ -22,6 +22,7 @@ Single-player works. These items were tested with scripted input
 | Campaign video, briefing (text and voice files) | Play. |
 | Mission 1 | Plays: the camera tour, select a commando, walk, Ctrl+B briefing. |
 | Frame rate | 20 frames per second in the mission (the game's own limit is 50 ms per frame). |
+| End of mission 1, (N)ext mission | Works: the mission 2 briefing and map load. |
 | In-game menu (Escape), Save Game into a slot | Works. The file `SAVE0000.SAV` is written. |
 | Quick save (Ctrl+S) and quick load (Ctrl+L) | Work. `QLOAD.SAV` is written and read back. |
 | Music (WAV streams) and sound effects (Miles samples) | Reach the mixer. Not checked by ear. |
@@ -123,6 +124,10 @@ shared: see [common/README.md](../common/README.md).
 - The runtime implements kernel32, user32, gdi32, DirectDraw, winmm, a Miles
   Sound System layer on a native mixer, and the DirectShow multimedia stream
   (Cinepak and MS ADPCM decoders) that the game uses for its videos.
+- SRW can leave CPU flags uncomputed that a jump target reads (stale
+  flags). `../common/tools/check_flags.py` finds these places at each build,
+  and `srw/llasm/instruction_flags.sci` fixes them. One of them (at
+  `0x60F2E4`) made the game crash after mission 1.
 
 ## License and credits
 

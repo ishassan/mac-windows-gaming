@@ -533,3 +533,12 @@ loc_67B1EA,0x08,0x00
 loc_67B1EF,0x00,0x08
 loc_67FE33,0x38,0x00
 loc_67FE3C,0x00,0x38
+loc_5F7193,0x30,0x00 ;jle: test edi, edi must keep SF and OF for the jge at 5F71A0
+loc_5F719E,0x30,0x00 ;jg: test edi, edi must keep SF and OF for the jge at 5F71A0
+loc_5F71A0,0x00,0x30
+loc_60F298,0x01,0x00 ;jge: cmp edi, esi must keep CF for the jae at 60F29A
+loc_60F2E6,0x01,0x00 ;jl: cmp edi, esi must keep CF (crash after mission 1: strcmp of NULL)
+loc_60F29A,0x00,0x01
+loc_66557B,0x08,0x00 ;jmp: cmp [ebp-4], -1 must keep ZF for the jz at 665590
+loc_66558D,0x08,0x00 ;cmp ebx, -1 falls through to the jz at 665590
+loc_665590,0x00,0x08

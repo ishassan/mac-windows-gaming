@@ -17,6 +17,8 @@ SRW_KEEP_GOING=1 "$HOSTBIN/SRW" "$GAME_EXE" "$GAME_LLASM.llasm" > srw.out 2> srw
 grep "^Error" srw.err > srw-traps.txt || true
 echo "SRW traps: $(wc -l < srw-traps.txt | tr -d ' ')"
 python "$COMMON/tools/compact_source_llasm.py"
+# SRW can leave flags uncomputed that a jump target reads (see check_flags.py)
+python "$COMMON/tools/check_flags.py" seg01_code.llinc
 mkdir -p ../gen
 cp "$GAME_LLASM.llasm" seg0*.llinc ../gen/
 cp ../gen/rt-llasm/*.llinc ../gen/

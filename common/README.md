@@ -50,7 +50,7 @@ same name as a shared file replaces it) and its own `runtime/imports.spec`
 | `not_relocations.txt` | Values that look like addresses but are constants (the address of the 4-byte value). |
 | `llasm/external_procedures.sci` | x86 functions replaced with native code (`loc_X,name_asm2c`). |
 | `llasm/instruction_replacements.sci` | llasm code for x86 instructions that SRW cannot translate. A replacement does not end the flow: it must reach the next instruction or end with `tcall`/`endp`. |
-| `llasm/instruction_flags.sci` | Flag dependencies (`tools/fix_flags.py` makes the entries). |
+| `llasm/instruction_flags.sci` | Flag dependencies (`tools/fix_flags.py` makes the entries; `tools/check_flags.py` finds the ones that SRW does not report). |
 | `llasm/global_aliases.sci` | Names for labels (for example the entry point). |
 
 `tools/run-srw.sh` copies these files into `build/srw/`, runs `gen_relocs.py`
@@ -124,6 +124,7 @@ trace (only the first entry is always correct).
 | `gen_relocs.py` | Finds the relocations of an exe that has none. |
 | `listing.py`, `find_overlaps.py` | A code listing (`build/listing.txt`); jumps into the middle of instructions. |
 | `fix_flags.py` | Makes `instruction_flags.sci` entries. |
+| `check_flags.py` | Finds jump targets that read CPU flags that SRW did not compute (stale flags). `run-srw.sh` runs it, and the build stops when it finds one. |
 | `gen_glue.py`, `gen_extern.py`, `gen_com.py` | The llasm glue between the recompiled code and the runtime. |
 | `pe_analyze.py`, `crt_probe.py` | Find and name C runtime functions in the exe. |
 | `disasm.py <hex> [before] [after]` | The x86 code at an address. |
