@@ -1,0 +1,2 @@
+loc_65459C,8,;jmp dword [ecx*4+loc_6546A4]|mov tmpadr, loc_654694|add tmpadr, tmpadr, 16|shl tmp0, ecx, 2|add tmpadr, tmpadr, tmp0|load tmp1, tmpadr, 4|tcall tmp1|endp ; jmp + nop. memmove TrailUpVec with index -4..-1: 0x6546A4 is also code, use the table start + 16
+loc_6528DC,8,;jmp dword [ecx*4+loc_6529E4]|mov tmpadr, loc_6529D4|add tmpadr, tmpadr, 16|shl tmp0, ecx, 2|add tmpadr, tmpadr, tmp0|load tmp1, tmpadr, 4|tcall tmp1|endp ; jmp + nop. memcpy TrailUpVec with index -4..-1: 0x6529E4 is also code, use the table start + 16

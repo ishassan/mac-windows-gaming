@@ -1,0 +1,40 @@
+;; Commandos port: llasm declarations that the SR support files do not have.
+;; MIT license, see README.md.
+
+funcv x87_fldpi_void $
+
+macro FLDPI_VOID
+    call x87_fldpi_void $
+endm
+
+funcv x87_fxam_void $
+funcv x87_fprem_void $
+funcv x87_fscale_void $
+funcv x87_fpatan_void $
+
+macro FXAM_VOID
+    call x87_fxam_void $
+endm
+
+macro FPREM_VOID
+    call x87_fprem_void $
+endm
+
+macro FSCALE_VOID
+    call x87_fscale_void $
+endm
+
+macro FPATAN_VOID
+    call x87_fpatan_void $
+endm
+
+funcv x87_fnstenv_void $, *env
+funcv x87_fldenv_void $, *env
+
+macro FNSTENV_MEM env
+    call x87_fnstenv_void $, \env
+endm
+
+macro FLDENV_MEM env
+    call x87_fldenv_void $, \env
+endm

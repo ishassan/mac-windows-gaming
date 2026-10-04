@@ -1,0 +1,16 @@
+# Build environment for the Commandos native port.
+# Create:   conda env create -f environment.yml
+# Then:     conda activate commandos-native && tools/install-ldc.sh
+# The D compiler (LDC) is not on conda-forge. tools/install-ldc.sh puts the
+# official LDC release inside this environment's folder.
+name: commandos-native
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - capstone=5.0     # x86 disassembler (relocation finder)
+  - pefile           # PE file reader
+  - scons=4.11       # builds SRW and the game
+  - llvm-tools=23    # llc/opt: compile llasm output to arm64
+  - sdl2=2.32        # window, input, audio for the runtime layer
+  - python-unicorn=2.1  # x86 emulator: identify C runtime functions by running them

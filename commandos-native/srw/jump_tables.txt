@@ -1,0 +1,14 @@
+# Jump tables that tools/gen_relocs.py cannot size by itself.
+# <table displacement in the jmp> <first index> <entries>
+# CRT memcpy/memmove (0x654520): TrailUpVec, used with index 0..3 and -4..-1
+654694  0  4
+6546a4 -4  4
+# UnwindDownVec, used with index -7..0
+6547e0 -7  8
+# TrailDownVec, index 0..3
+654830  0  4
+# Second copy of the same code (CRT memcpy at 0x652860)
+6529d4  0  4
+6529e4 -4  4
+652b20 -7  8
+652b70  0  4
