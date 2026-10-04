@@ -3,8 +3,9 @@
 A native arm64 macOS build of the GOG version of *Commandos: Behind Enemy Lines*.
 It does not use Wine or Rosetta. The game's own x86 code (`comandos.exe`) is
 statically recompiled to arm64 with [M-HT/SR](https://github.com/M-HT/SR)
-(SRW, llasm, LLVM). A native layer (`runtime/`, based on the SR Septerra Core
-port, MIT license) replaces the Windows APIs with SDL2.
+(SRW, llasm, LLVM). The shared native layer in
+[`../common/runtime`](../common/README.md) (partly based on the SR Septerra
+Core port, MIT license) replaces the Windows APIs with SDL2.
 
 Game data is not included. This repository never contains game files or
 code generated from them. All of that is in the ignored `build/` folder.
@@ -35,8 +36,9 @@ Known issues:
 - In the in-game menu (Escape), the game ignores the first mouse click. The
   second click works. The keyboard (arrows and Return) works at once. It is
   not known if the Windows version does the same.
-- GDI text on surfaces is not drawn. The game uses it only for the developer
-  overlay ("FPS", screen mode) that `.DEVELOP 1` in `OUTPUT/Comando.cfg` turns on.
+- The game uses GDI text only for the developer overlay ("FPS", screen
+  mode) that `.DEVELOP 1` in `OUTPUT/Comando.cfg` turns on. The shared text
+  layer draws GDI text now, but this overlay was not tested.
 - Multiplayer is off (the network functions fail on purpose).
 - CD audio (Miles "redbook" functions) is off. The GOG version plays music
   from WAV files, which work.
@@ -49,28 +51,36 @@ Known issues:
 2. Build the program and the app bundle (see below), then open
    `Commandos Behind Enemy Lines (Native).app`.
 
+The game starts in full screen at the size of your screen (the 640x480
+picture is scaled, with its shape kept). Cmd+Return or Alt+Return switches
+between full screen and a window. To start in a window, put
+`Display_Mode=window` in `Commandos.cfg` in the game folder.
+
 Saves go to `User/Pyro Studios/Commandos/OUTPUT/` in the game folder.
 
 ## Build
 
+From the repository root (once): `conda env create -f environment.yml`,
+`. common/tools/env.sh`, `common/tools/install-ldc.sh`. Then:
+
 ```sh
-conda env create -f environment.yml
-. tools/env.sh
-tools/install-ldc.sh
-make tools
-make GAME_DIR="$HOME/Games/Commandos Behind Enemy Lines/Game Data"
+cd commandos-native
+. ../common/tools/env.sh
+make tools                                   # once for all games
+make                                         # reads comandos.exe from the game folder
 ./build/Commandos
-macos/make-bundle.sh [output folder]     # default output folder: build
+../common/macos/make-bundle.sh [output folder]   # default output folder: build
 ```
 
-All build tools come from the conda env `commandos-native` (`environment.yml`).
-The LDC D compiler is not on conda-forge: `tools/install-ldc.sh` puts the
-official release into the env folder. `make` reads `comandos.exe` from
-`GAME_DIR` and writes everything it makes into `build/`. `make` stops if
-`CONDA_PREFIX` is not set (run `. tools/env.sh` first), so that SDL2 always
-comes from the env.
+All build tools come from the repository's conda env `mac-windows-gaming`
+(`../environment.yml`). The LDC D compiler is not on conda-forge:
+`common/tools/install-ldc.sh` puts the official release into the env folder.
+`make` reads `comandos.exe` from `GAME_DIR` (default: the folder in
+`game.conf`) and writes everything it makes into `build/`. `make` stops if
+`CONDA_PREFIX` is not set (run `. ../common/tools/env.sh` first), so that
+SDL2 always comes from the env.
 
-`macos/make-bundle.sh` copies the program, SDL2 (sdl2-compat) and SDL3 into
+`make-bundle.sh` copies the program, SDL2 (sdl2-compat) and SDL3 into
 the bundle, makes the icon from the GOG icon in the game folder, and signs
 the bundle ad hoc (`codesign -s -`).
 
@@ -81,7 +91,7 @@ Environment variables for `build/Commandos`:
 | Variable | Effect |
 |----------|--------|
 | `COMMANDOS_DATA=<folder>` | Game folder. |
-| `COMMANDOS_SCRIPT=<file>` | Scripted input for tests: lines `<ms> move x y`, `click x y`, `rclick x y`, `key <name>` (`Ctrl+S` holds a modifier), `shot <name>`, `quit`. See `runtime/input-script.c`. |
+| `COMMANDOS_SCRIPT=<file>` | Scripted input for tests: lines `<ms> move x y`, `click x y`, `rclick x y`, `key <name>` (`Ctrl+S` holds a modifier), `shot <name>`, `quit` and more. See `../common/runtime/input-script.c`. |
 | `COMMANDOS_DUMP=<folder>` | Saves every 30th frame as BMP, and is the folder for `shot` (default `$TMPDIR`). |
 | `COMMANDOS_TRACE_FILES=1` | Logs file opens and searches. |
 | `COMMANDOS_TRACE_MSG=1` | Logs window messages, key state reads and key mapping calls. |
@@ -95,20 +105,8 @@ stack trace (only the first entry is always correct).
 
 ## Tools
 
-| Tool | Use |
-|------|-----|
-| `tools/fetch-sr.sh`, `tools/build-tools.sh` | Get M-HT/SR at a fixed commit and build SRW and llasm with `tools/patches/srw.patch`. |
-| `tools/gen_relocs.py` | Rebuilds the relocation table that the exe does not have (`srw/jump_tables.txt` adds jump tables it cannot find). |
-| `tools/run-srw.sh`, `tools/fix_flags.py` | Run SRW; make `instruction_flags.sci` entries. |
-| `tools/gen_glue.py`, `tools/gen_extern.py`, `tools/gen_com_glue.py` | Make the llasm glue between recompiled code and the C runtime. |
-| `tools/pe_analyze.py`, `tools/crt_probe.py` | Find and name C runtime functions in the exe. |
-| `tools/disasm.py <hex> [before] [after]` | Shows the x86 code at an address. |
-| `tools/run-game.sh`, `tools/debug-game.sh` | Run the game for N seconds (with lldb for the second). |
-| `tools/sym.sh`, `tools/trace.py` | Turn host addresses and guest stack words into `loc_` names. |
-
-For lldb, `x86_reg(n)`, `x86_peek(addr)`, `x86_ptr(addr)`, `x86_stack_dword(n)`
-and `x86_code_name(value)` read the guest state. Each x86 label is a function
-`loc_XXXXXX`, so `breakpoint set -n loc_XXXXXX` stops at that x86 address.
+The tools (relocation finder, glue makers, disassembler, debug helpers) are
+shared: see [common/README.md](../common/README.md).
 
 ## How it works
 
@@ -117,13 +115,13 @@ and `x86_code_name(value)` read the guest state. Each x86 label is a function
   address is the host address minus a fixed offset (`-ptrofs`).
 - The C runtime functions that SRW cannot translate well (memcpy jump tables,
   80-bit x87 helpers, printf float formatting) are replaced with native code
-  (`srw/llasm/*.sci`, `runtime/llasm/Commandos-asm.llasm`).
+  (`srw/llasm/*.sci`, `../common/runtime/llasm/c2asm-crt.llasm`).
 - The runtime implements kernel32, user32, gdi32, DirectDraw, winmm, a Miles
   Sound System layer on a native mixer, and the DirectShow multimedia stream
   (Cinepak and MS ADPCM decoders) that the game uses for its videos.
 
 ## License and credits
 
-- M-HT/SR and the Septerra Core runtime files: Copyright (C) Roman Pauer, MIT license.
+- M-HT/SR and the runtime files from its Septerra Core port: Copyright (C) Roman Pauer, MIT license.
 - The files in this folder: MIT license.
 - *Commandos: Behind Enemy Lines* is a game by Pyro Studios. You need your own copy.

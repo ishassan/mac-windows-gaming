@@ -1,0 +1,36 @@
+# Everything made from the game files or by the build stays local.
+# The repository is public: never track game data or code generated from it.
+build/
+*.exe
+*.EXE
+*.dll
+*.DLL
+*.llasm
+*.llinc
+# hand-written runtime glue (not made from game files)
+!**/runtime/llasm/*.llasm
+!**/runtime/llasm/*.llinc
+*.ll
+*.o
+*.a
+*.resdump
+relocations.csv
+# game data (Commandos, Revenant)
+*.DIR
+*.avi
+*.AVI
+*.wav
+*.WAV
+*.smk
+*.SMK
+*.ogg
+*.mp3
+*.MP3
+*.rvr
+*.rvi
+*.rvm
+*.dat
+*.DAT
+*.sav
+*.SAV
+.DS_Store

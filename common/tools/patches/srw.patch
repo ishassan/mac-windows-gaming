@@ -1,0 +1,380 @@
+diff --git a/SRW/SRW_loader.c b/SRW/SRW_loader.c
+index 7ae6bbd..b45086a 100644
+--- a/SRW/SRW_loader.c
++++ b/SRW/SRW_loader.c
+@@ -1138,6 +1138,7 @@ int SRW_LoadFile(const char *fname)
+                             case   8: ProcName = "ws2_32.htonl"; break;
+                             case   9: ProcName = "ws2_32.htons"; break;
+                             case  10: ProcName = "ws2_32.inet_addr"; break;
++                            case  11: ProcName = "ws2_32.inet_ntoa"; break;
+                             case  12: ProcName = "ws2_32.ioctlsocket"; break;
+                             case  13: ProcName = "ws2_32.listen"; break;
+                             case  14: ProcName = "ws2_32.ntohl"; break;
+@@ -1154,6 +1155,7 @@ int SRW_LoadFile(const char *fname)
+                             case  57: ProcName = "ws2_32.gethostname"; break;
+                             case 111: ProcName = "ws2_32.WSAGetLastError"; break;
+                             case 115: ProcName = "ws2_32.WSAStartup"; break;
++                            case 116: ProcName = "ws2_32.WSACleanup"; break;
+                         }
+                     }
+ 
+diff --git a/SRW/SR_full_llasm.c b/SRW/SR_full_llasm.c
+index a465f77..1c0dfe9 100644
+--- a/SRW/SR_full_llasm.c
++++ b/SRW/SR_full_llasm.c
+@@ -25,6 +25,7 @@
+ #include <stdio.h>
+ #include <malloc.h>
+ #include <string.h>
++#include <stdlib.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+ #include "udis86_dep.h"
+@@ -145,7 +146,9 @@ int SR_disassemble_region_llasm(unsigned int Entry, region_data *region)
+             {
+                 fprintf(stderr, "Error: unknown flags - %i - %i (0x%x) - %s\n", Entry, (unsigned int)cur_ofs, (unsigned int)(section[Entry].start + cur_ofs), output->str);
+ 
+-                return 5;
++                if (getenv("SRW_KEEP_GOING") == NULL) return 5;
++                if (flags_read == FL_UNKNOWN) flags_read = 0;
++                if (flags_write == FL_UNKNOWN) flags_write = 0;
+             }
+ 
+             iflags = section_iflags_list_FindEntryEqual(Entry, cur_ofs);
+@@ -306,7 +309,8 @@ int SR_disassemble_region_llasm(unsigned int Entry, region_data *region)
+             {
+                 fprintf(stderr, "Error: unknown flags on start of region - %i - %i (0x%x) - 0x%x\n", Entry, (unsigned int)cur_ofs, (unsigned int)(section[Entry].start + cur_ofs), (unsigned int)flags_to_write);
+ 
+-                return 6;
++                if (getenv("SRW_KEEP_GOING") == NULL) return 6;
++                flags_to_write = 0;
+             }
+         }
+     }
+diff --git a/SRW/SR_full_llasm_instr.c b/SRW/SR_full_llasm_instr.c
+index 204b86d..9d76cb4 100644
+--- a/SRW/SR_full_llasm_instr.c
++++ b/SRW/SR_full_llasm_instr.c
+@@ -25,6 +25,7 @@
+ #include <stdio.h>
+ #include <malloc.h>
+ #include <string.h>
++#include <stdlib.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+ #include "udis86_dep.h"
+@@ -2369,6 +2370,21 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                 }
+             }
+             break;
++        case UD_Icpuid:
++            {
++                /* no flags affected; report a CPU without SSE/SSE2 */
++                OUTPUT_STRING("mov eax, 0\n");
++                OUTPUT_STRING("mov ebx, 0\n");
++                OUTPUT_STRING("mov ecx, 0\n");
++                OUTPUT_STRING("mov edx, 0\n");
++            }
++            break;
++        case UD_Ifclex:
++            {
++                /* FPU exceptions are not emulated */
++                OUTPUT_STRING("; fnclex\n");
++            }
++            break;
+         case UD_Ibt:
+             {
+                 /* ZF,OF,AF,SF,PF undefined, CF - modified */
+@@ -2380,7 +2396,26 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     }
+                     else if (ud_obj.operand[0].type == UD_OP_MEM)
+                     {
+-                        if (ud_obj.operand[0].size == 32)
++                        if ((ud_obj.operand[0].size == 32) && (ud_obj.operand[1].type == UD_OP_REG) &&
++                            (ud_obj.operand[1].base >= UD_R_EAX && ud_obj.operand[1].base <= UD_R_EDI))
++                        {
++                            /* bt [mem], r32: bit string, byte offset = r32 >> 3 (signed) */
++                            SR_disassemble_get_madr(cOutput, &(ud_obj.operand[0]), fixup[0], extrn[0], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                            memadr.align = 1;
++
++                            OUTPUT_PARAMSTRING("ashr tmp1, %s, 3\n", X86REGSTR(ud_obj.operand[1].base));
++                            OUTPUT_STRING("add tmpadr, tmpadr, tmp1\n");
++
++                            SR_disassemble_read_mem_byte(cOutput, &memadr, LR_TMP1, READ8TO32ZERO);
++
++                            SR_disassemble_change_flags(pOutput, FL_CARRY, 0, 0);
++
++                            OUTPUT_PARAMSTRING("and tmp2, %s, 7\n", X86REGSTR(ud_obj.operand[1].base));
++                            OUTPUT_STRING("lshr tmp1, tmp1, tmp2\n");
++                            OUTPUT_STRING("and tmp1, tmp1, CF\n");
++                            OUTPUT_STRING("or eflags, eflags, tmp1\n");
++                        }
++                        else if (ud_obj.operand[0].size == 32)
+                         {
+                             if (ud_obj.operand[1].type == UD_OP_IMM)
+                             {
+@@ -2444,6 +2479,37 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+             {
+                 /* ZF,OF,AF,SF,PF undefined, CF - modified */
+ 
++                if ((ud_obj.operand[0].type == UD_OP_MEM) && (ud_obj.operand[0].size == 32) &&
++                    (ud_obj.operand[1].type == UD_OP_REG) &&
++                    (ud_obj.operand[1].base >= UD_R_EAX && ud_obj.operand[1].base <= UD_R_EDI))
++                {
++                    /* bts [mem], r32 */
++                    SR_disassemble_get_madr(cOutput, &(ud_obj.operand[0]), fixup[0], extrn[0], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    memadr.align = 1;
++
++                    OUTPUT_PARAMSTRING("ashr tmp1, %s, 3\n", X86REGSTR(ud_obj.operand[1].base));
++                    OUTPUT_STRING("add tmpadr, tmpadr, tmp1\n");
++
++                    SR_disassemble_read_mem_byte(cOutput, &memadr, LR_TMP1, READ8TO32ZERO);
++
++                    OUTPUT_PARAMSTRING("and tmp2, %s, 7\n", X86REGSTR(ud_obj.operand[1].base));
++                    if (flags_to_write & FL_CARRY)
++                    {
++                        SR_disassemble_change_flags(pOutput, FL_CARRY, 0, 0);
++                        OUTPUT_STRING("lshr tmp3, tmp1, tmp2\n");
++                        OUTPUT_STRING("and tmp3, tmp3, CF\n");
++                        OUTPUT_STRING("or eflags, eflags, tmp3\n");
++                    }
++                    OUTPUT_STRING("mov tmp3, 1\n");
++                    OUTPUT_STRING("shl tmp3, tmp3, tmp2\n");
++                    OUTPUT_STRING("or tmp1, tmp1, tmp3\n");
++
++                    SR_disassemble_write_mem_byte(cOutput, &memadr, LR_TMP1, WRITE8LOW);
++                }
++                else
++
++                /* ZF,OF,AF,SF,PF undefined, CF - modified */
++
+                 if (ud_obj.operand[0].type == UD_OP_REG)
+                 {
+                     if (ud_obj.operand[0].base >= UD_R_EAX && ud_obj.operand[0].base <= UD_R_EDI)
+@@ -6390,8 +6456,11 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+             }
+             break;
+         case UD_Iseta:
++        case UD_Isetae:
+         case UD_Isetb:
+         case UD_Isetbe:
++        case UD_Iseto:
++        case UD_Isetno:
+         //case UD_Isetnb:
+         //case UD_Isetnbe:
+         case UD_Isetg:
+@@ -6419,12 +6488,16 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     OUTPUT_STRING("and tmp1, eflags, SF\n");
+                     setifzero = (ud_obj.mnemonic == UD_Isets)?0:1;
+                 }
+-                else if ((ud_obj.mnemonic == UD_Isetb) //|| (ud_obj.mnemonic == UD_Isetnb)
+-                        )
++                else if ((ud_obj.mnemonic == UD_Isetb) || (ud_obj.mnemonic == UD_Isetae))
+                 {
+                     OUTPUT_STRING("and tmp1, eflags, CF\n");
+                     setifzero = (ud_obj.mnemonic == UD_Isetb)?0:1;
+                 }
++                else if ((ud_obj.mnemonic == UD_Iseto) || (ud_obj.mnemonic == UD_Isetno))
++                {
++                    OUTPUT_STRING("and tmp1, eflags, OF\n");
++                    setifzero = (ud_obj.mnemonic == UD_Iseto)?0:1;
++                }
+                 else if ((ud_obj.mnemonic == UD_Isetbe) || (ud_obj.mnemonic == UD_Iseta) //|| (ud_obj.mnemonic == UD_Isetnbe)
+                         )
+                 {
+@@ -6710,6 +6783,14 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                                     flags_write = flags_to_write;
+                                 }
+                             }
++                            else if (ud_obj.operand[1].base >= UD_R_AH && ud_obj.operand[1].base <= UD_R_BH)
++                            {
++                                /* test r8l, r8h */
++                                if (SR_llasm_helper_and_8l(ud_obj.mnemonic, LR_TMP1, X868L2LLREG(ud_obj.operand[0].base), X868H2LLREG(ud_obj.operand[1].base), 8))
++                                {
++                                    flags_write = flags_to_write;
++                                }
++                            }
+                         }
+                         else if (ud_obj.operand[1].type == UD_OP_MEM)
+                         {
+@@ -6732,6 +6813,11 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                         {
+                             if (ud_obj.operand[1].base >= UD_R_AL && ud_obj.operand[1].base <= UD_R_BL)
+                             {
++                                /* test r8h, r8l */
++                                if (SR_llasm_helper_and_8h(ud_obj.mnemonic, LR_TMP1, X868H2LLREG(ud_obj.operand[0].base), X868L2LLREG(ud_obj.operand[1].base), 0))
++                                {
++                                    flags_write = flags_to_write;
++                                }
+                             }
+                             else if (ud_obj.operand[1].base >= UD_R_AH && ud_obj.operand[1].base <= UD_R_BH)
+                             {
+@@ -7118,6 +7204,7 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+         case UD_Ifcompp:
+         case UD_Ifcos:
+         case UD_Ifld1:
++        case UD_Ifldpi:
+         case UD_Ifldlg2:
+         case UD_Ifldln2:
+         case UD_Ifldz:
+@@ -7127,6 +7214,12 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+         case UD_Ifsqrt:
+         case UD_Ifucompp:
+         case UD_Ifyl2x:
++        case UD_Ifxam:
++        case UD_Ifprem:
++        case UD_Ifscale:
++        case UD_Ifpatan:
++        case UD_Ifrndint:
++        case UD_If2xm1:
+             {
+                 /* no flags affected */
+ 
+@@ -7142,6 +7235,7 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                 else if (ud_obj.mnemonic == UD_Ifcompp) instr = "FCOMPP";
+                 else if (ud_obj.mnemonic == UD_Ifcos) instr = "FCOS";
+                 else if (ud_obj.mnemonic == UD_Ifld1) instr = "FLD1";
++                else if (ud_obj.mnemonic == UD_Ifldpi) instr = "FLDPI";
+                 else if (ud_obj.mnemonic == UD_Ifldlg2) instr = "FLDLG2";
+                 else if (ud_obj.mnemonic == UD_Ifldln2) instr = "FLDLN2";
+                 else if (ud_obj.mnemonic == UD_Ifldz) instr = "FLDZ";
+@@ -7150,6 +7244,12 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                 else if (ud_obj.mnemonic == UD_Ifsin) instr = "FSIN";
+                 else if (ud_obj.mnemonic == UD_Ifsqrt) instr = "FSQRT";
+                 else if (ud_obj.mnemonic == UD_Ifucompp) instr = "FUCOMPP";
++                else if (ud_obj.mnemonic == UD_Ifxam) instr = "FXAM";
++                else if (ud_obj.mnemonic == UD_Ifprem) instr = "FPREM";
++                else if (ud_obj.mnemonic == UD_Ifscale) instr = "FSCALE";
++                else if (ud_obj.mnemonic == UD_Ifpatan) instr = "FPATAN";
++                else if (ud_obj.mnemonic == UD_Ifrndint) instr = "FRNDINT";
++                else if (ud_obj.mnemonic == UD_If2xm1) instr = "F2XM1";
+                 else /*if (ud_obj.mnemonic == UD_Ifyl2x)*/ instr = "FYL2X";
+ 
+                 if (ud_obj.operand[0].type == UD_NONE)
+@@ -7594,6 +7694,16 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                 }
+             }
+             break;
++        case UD_Ifldenv:
++        case UD_Ifnstenv:
++            {
++                /* no flags affected */
++
++                SR_disassemble_get_madr(cOutput, &(ud_obj.operand[0]), fixup[0], extrn[0], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++
++                OUTPUT_PARAMSTRING("%s_MEM %s\n", (ud_obj.mnemonic == UD_Ifldenv) ? "FLDENV" : "FNSTENV", memadr.madr);
++            }
++            break;
+         case UD_Ifrstor:
+         case UD_Ifnsave:
+             {
+@@ -7746,17 +7856,36 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+             break;
+ 
+ #endif
++        case UD_Icmpsd:
++            if ((ud_obj.operand[0].type == UD_NONE) && (ud_obj.pfx_rep || ud_obj.pfx_repe || ud_obj.pfx_repne))
++            {
++                /* repe/repne cmpsd: OF,SF,ZF,AF,PF,CF - set by the C helper from the
++                   last compared dwords (no change when ecx = 0) */
++                OUTPUT_STRING("ifnz ecx\n");
++                OUTPUT_STRING(ud_obj.pfx_repne ? "REPNE_CMPSD\n" : "REPE_CMPSD\n");
++                OUTPUT_STRING("endif\n");
++                flags_write = flags_to_write;
++                break;
++            }
++            /* other forms (SSE2 cmpsd, cmpsd without rep): fall through */
+         default:
+-            fprintf(stderr, "Error: unknown instruction - %i - %i - %s\n", Entry, (unsigned int)cur_ofs, output->str);
++            fprintf(stderr, "Error: unknown instruction - %i - %i (0x%x) - %s\n", Entry, (unsigned int)cur_ofs, (unsigned int)(section[Entry].start + cur_ofs), output->str);
+ 
+-            return 5;
++            /* SRW_KEEP_GOING: list every problem in one run (diagnostic only) */
++            if (getenv("SRW_KEEP_GOING") == NULL) return 5;
++            /* never expected to run: stop the program with the address */
++            OUTPUT_PARAMSTRING("call x86_unsupported_instruction 0x%x\n", (unsigned int)(section[Entry].start + cur_ofs));
++            flags_write = flags_to_write;
++            break;
+     }
+ 
+     if (cOutput[0] == 0)
+     {
+-            fprintf(stderr, "Error: llasm instruction error - %i - %i - %s\n", Entry, (unsigned int)cur_ofs, output->str);
++            fprintf(stderr, "Error: llasm instruction error - %i - %i (0x%x) - %s\n", Entry, (unsigned int)cur_ofs, (unsigned int)(section[Entry].start + cur_ofs), output->str);
+ 
+-            return 7;
++            if (getenv("SRW_KEEP_GOING") == NULL) return 7;
++            OUTPUT_PARAMSTRING("call x86_unsupported_instruction 0x%x\n", (unsigned int)(section[Entry].start + cur_ofs));
++            flags_write = flags_to_write;
+     }
+ 
+     {
+diff --git a/SRW/SR_full_llasm_instr_helper.h b/SRW/SR_full_llasm_instr_helper.h
+index 6790022..7ca7595 100644
+--- a/SRW/SR_full_llasm_instr_helper.h
++++ b/SRW/SR_full_llasm_instr_helper.h
+@@ -1764,6 +1764,11 @@ static int SR_llasm_helper_and_32(enum ud_mnemonic_code mnemonic, enum ll_regs d
+ 
+         SR_disassemble_set_flags_AZSP(pOutput, result_reg, LR_TMP4, 32, 0, mnemonic, Tflags_to_write & ~FL_ADJUST);
+     }
++    else if ((retval == 0) && (result_reg == src1) && (src1 == src2))
++    {
++        /* test r, r / or r, r whose flags are not used: nothing to do */
++        OUTPUT_STRING("; flags not used\n");
++    }
+ 
+     return retval;
+ }
+diff --git a/SRW/SR_full_win32.c b/SRW/SR_full_win32.c
+index 4075221..b1304c9 100644
+--- a/SRW/SR_full_win32.c
++++ b/SRW/SR_full_win32.c
+@@ -62,6 +62,7 @@ int SR_disassemble_remove_segment(const char *ostr, char *dst, uint8_t pfx_seg)
+             break;
+         case UD_R_GS:
+             seg = "gs:";
++            fprintf(stderr, "Error: gs segment prefix in \"%s\" (decoded data as code?)\n", ostr);
+             return -102;
+             break;
+         default:
+@@ -1104,6 +1105,7 @@ int SR_disassemble_offset_win32(unsigned int Entry, uint_fast32_t offset)
+                 break;
+             case UD_Iinvalid:
+                 printf("decoded length: %i\n", decoded_length);
++                fprintf(stderr, "Error: invalid instruction at 0x%x (decoded data as code?)\n", (unsigned int)(section[Entry].start + offset));
+                 return 3;
+                 break;
+ 
+diff --git a/SRW/udis86_dep.c b/SRW/udis86_dep.c
+index e95efa7..1cf017e 100644
+--- a/SRW/udis86_dep.c
++++ b/SRW/udis86_dep.c
+@@ -97,6 +97,18 @@ int init_udis86_dep(void)
+ 	SET_FLAGS(UD_Ifisubr, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifld, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifld1, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifldpi, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifxam, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifldenv, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifnstenv, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifprem, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifscale, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifpatan, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifrndint, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_If2xm1, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Icmpsd, /* FL_DIRECTION */ FL_NONE, FL_COND_SUB);
++	SET_FLAGS(UD_Ifclex, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Icpuid, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifldcw, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifldlg2, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifldln2, FL_NONE, FL_NONE);
+@@ -219,6 +231,9 @@ int init_udis86_dep(void)
+ 	SET_FLAGS(UD_Iscasb, /* FL_DIRECTION */ FL_NONE, FL_COND_SUB);
+ 	SET_FLAGS(UD_Iseta, FL_ZERO | FL_CARRY, FL_NONE);
+ 	SET_FLAGS(UD_Isetb, FL_CARRY, FL_NONE);
++	SET_FLAGS(UD_Isetae, FL_CARRY, FL_NONE);
++	SET_FLAGS(UD_Iseto, FL_OVERFLOW, FL_NONE);
++	SET_FLAGS(UD_Isetno, FL_OVERFLOW, FL_NONE);
+ 	SET_FLAGS(UD_Isetbe, FL_ZERO | FL_CARRY, FL_NONE);
+ 	SET_FLAGS(UD_Isetg, FL_ZERO | FL_SIGN | FL_OVERFLOW, FL_NONE);
+ 	SET_FLAGS(UD_Isetge, FL_SIGN | FL_OVERFLOW, FL_NONE);

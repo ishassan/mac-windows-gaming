@@ -1,0 +1,3 @@
+loc_58BE80,strncmp_asm2c
+loc_58BAD0,_CIpow_asm2c
+loc_5995C6,crt_noop_asm2c
