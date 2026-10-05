@@ -102,6 +102,17 @@ int main(int argc, char *argv[])
 
     tzset();
 
+    /* <P>BACKGROUND=1: no window on the screen and no sound, so that a test
+     * does not take the screen, the keyboard or the speakers from the user.
+     * SDL draws into memory (its "dummy" video driver). <P>DUMP and the
+     * "shot" script command still save the game's frames. */
+    const int background = (game_getenv("BACKGROUND") != NULL);
+    if (background)
+    {
+        SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy");
+        SDL_SetHint(SDL_HINT_AUDIODRIVER, "dummy");
+    }
+
     if (SDL_Init(SDL_INIT_NOPARACHUTE))
     {
         eprintf("Error: SDL_Init: %s\n", SDL_GetError());
@@ -113,6 +124,7 @@ int main(int argc, char *argv[])
     atexit(SDL_Quit);
 
     ReadConfiguration(argc, argv);
+    if (background) Display_Mode = 0;   /* a window, not full screen */
 
     /* empty SEH chain: fs:[0] = -1 */
     current_SEH_frame = 0xffffffff;

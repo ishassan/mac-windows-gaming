@@ -107,6 +107,7 @@ example `REVENANT_`).
 | `<P>DATA=<folder>` | Game folder. |
 | `<P>SCRIPT=<file>` | Scripted input: `<ms> move x y`, `click x y`, `rclick x y`, `down x y`, `up x y`, `key <name>` (`Ctrl+S`, `Cmd+Return` hold a modifier), `text <string>`, `shot <name>`, `quit`. |
 | `<P>DUMP=<folder>` | Saves every 30th frame as BMP; the folder for `shot`. |
+| `<P>BACKGROUND=1` | No window on the screen and no sound: SDL draws into memory (its `dummy` video and audio drivers), so a test does not take the screen or the keyboard. Use it with `<P>DUMP` or `shot` to see the frames. Without it, the game starts normally. |
 | `<P>TRACE_FILES=1` | File opens and searches. |
 | `<P>TRACE_MSG=1` | Window messages and key state reads. |
 | `<P>TRACE_SOUND=1` or `2` | Miles and CD audio calls (2: every call). |
