@@ -1,0 +1,5 @@
+20 key Escape
+25 key Escape
+30 key Escape
+35 key Escape
+40 key Escape

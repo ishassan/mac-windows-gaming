@@ -22,7 +22,7 @@ SOFTWARE.
 
 ---
 
-Some files in common/runtime and common/tools come from M-HT/SR
+Some files in common/native-mac/runtime and common/native-mac/tools come from M-HT/SR
 (https://github.com/M-HT/SR): Copyright (C) Roman Pauer, MIT license. Those
 files keep their own copyright notice. The games themselves, their data and
 code made from them are not part of this repository and not under this license.

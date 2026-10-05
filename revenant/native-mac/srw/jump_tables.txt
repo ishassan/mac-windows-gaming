@@ -1,0 +1,18 @@
+# Jump tables that common/native-mac/tools/gen_relocs.py cannot size by itself.
+# <table displacement in the jmp> <first index> <entries>
+# CRT memcpy (0x58b780): TrailUpVec, used with index 0..3 and -4..-1
+58b8d8  0  4
+58b8e8 -4  4
+# UnwindDownVec, used with index -7..0
+58ba20 -7  8
+# TrailDownVec, index 0..3
+58ba70  0  4
+# Second copy of the same code (CRT memmove at 0x592230)
+592368  0  4
+592378 -4  4
+5924b0 -7  8
+592500  0  4
+# Multiplayer message names (function 0x461900): in this exe the case code
+# was overwritten by other code, only the default case is valid. No entries
+# are used: instruction_replacements.sci sends every case to the default.
+461b34  0  0

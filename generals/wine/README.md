@@ -1,0 +1,109 @@
+# Command & Conquer Generals Zero Hour on Wine (reference version)
+
+The original Windows Zero Hour (the EA app / Origin copy) on Homebrew Wine.
+It is a reference for the native app ([../native-mac](../native-mac/README.md)).
+The parts that all Wine versions share (Wine, folder layout, test methods)
+are in [../../common/wine](../../common/wine/README.md).
+
+## Files here
+
+| File | What it is |
+|---|---|
+| `app/Info.plist`, `app/launcher.sh` | The Wine app (`common/wine/make-app.sh`). |
+| `prefix.reg` | The registry settings of the prefix. Import: `wine regedit /S prefix.reg` (with `WINEPREFIX`). |
+
+## Layout on the Mac
+
+```
+~/Games/Command and Conquer Generals Zero Hour/
+  Command & Conquer Generals Zero Hour.app   the native app (see ../native-mac)
+  Game Data/
+    Command and Conquer Generals/            base game files (.big)
+    Command and Conquer Generals Zero Hour/  Zero Hour files (.big)
+  Settings and Saves/                        saves and settings of the native app
+  Old Windows Saves/                         saves and options of the Windows version
+  Wine/
+    Command & Conquer Generals Zero Hour (Wine).app
+    wineprefix/                              the Wine prefix
+      drive_c/EA Games/Command and Conquer Generals/            Wine-only files + links
+      drive_c/EA Games/Command and Conquer Generals Zero Hour/  Wine-only files + links
+    wine-launcher.log
+```
+
+- The app starts `game.dat`, the game program. `Generals.exe` is the EA app
+  launcher, and it stops with "EA app is not installed".
+- Both Wine game folders are real folders, with a link to each item in the
+  matching `Game Data` folder. Both apps read the `.big` files in both
+  `Game Data` folders.
+- Saves: My Documents in the prefix is a link to `Old Windows Saves`. The
+  Wine version uses the Windows saves and options, not the saves of the
+  native app.
+- The base game (without Zero Hour) can also run on Wine: its `game.dat` is
+  in the base Wine game folder. There is no app for it.
+
+## Wine-only files
+
+All come from the EA app (Origin) install. They are in both Wine game
+folders, except where noted.
+
+| File | What it does |
+|---|---|
+| `game.dat` | The game program. |
+| `mss32.dll`, `MSS/` | Miles sound (6.5c) and its plugins. Not patched: the game does not hang without the Miles fix. |
+| `BINKW32.DLL` | Bink video player. |
+| `Generals.exe`, `Core/` | The EA app launcher (it does not work on Wine; kept as part of the install). |
+| `WorldBuilder.exe` | The map editor (needs MFC 4.2, see below). |
+| `RedistInstallers/` | With `Options_Helper`. |
+| `BrowserEngine.dll` (base game only), `P2XDLL.DLL`, `patchw32.dll`, `patchget.dat`, `dbghelp.dll`, `Generals.dat`, `generals.lcf`, `gp.info` (base game only), `SUN.INI` (base game only), `00000000.016`, `00000000.256` | Other files of the EA install: DLLs and data files of the online, patch and launcher parts (the use of each file was not checked). |
+| `Generals.ico`, `GeneralsZH.ico` (Zero Hour), `Install_Final.bmp`, `launcher.bmp` | Icons, and the loading-screen and launcher images. |
+
+## Settings in the prefix
+
+- Registry, 32-bit view (`HKLM\Software\Wow6432Node\Electronic Arts\EA Games\...`):
+
+  | Key | `InstallPath` | `Language` | `MapPackVersion` | `Version` |
+  |---|---|---|---|---|
+  | `Generals` | `C:\EA Games\Command and Conquer Generals\` | `english` | dword `0x10000` | dword `0x10004` |
+  | `Command and Conquer Generals Zero Hour` | `C:\EA Games\Command and Conquer Generals Zero Hour\` | `english` | dword `0x10000` | dword `0x10004` |
+
+- `HKCU\Software\Wine\Direct3D\renderer` = `gl`. With the default renderer,
+  the screen stays black after the loading screen.
+- `HKCU\Software\Wine\Mac Driver\LeftCommandIsCtrl` = `Y`.
+- MFC 4.2 for `WorldBuilder.exe`: `winetricks mfc42` (Homebrew `winetricks`)
+  put `mfc42.dll` and `mfc42u.dll` into the prefix's `windows/syswow64`
+  (2026-10-05).
+
+## Set up again
+
+These steps repeat the result of the prefix of 2026-10-05 (the files and
+the settings in it), not a recorded command history.
+
+1. Install Wine: `brew install --cask wine-crossover`. For the map editor
+   also `brew install winetricks`.
+2. Put the `.big` files of the base game and Zero Hour in the two
+   `Game Data` folders (the native app needs them too).
+3. Make the prefix:
+   `WINEPREFIX="$HOME/Games/Command and Conquer Generals Zero Hour/Wine/wineprefix" wineboot -i`.
+4. Settings (with the same `WINEPREFIX`): `wine regedit /S generals/wine/prefix.reg`.
+   It sets the two EA Games keys above, the Direct3D renderer `gl` and
+   `LeftCommandIsCtrl`.
+5. Make the two Wine game folders under `<prefix>/drive_c/EA Games` and copy
+   the Wine-only files above from the install into them.
+6. For the map editor: `winetricks mfc42` (with the same `WINEPREFIX`).
+7. Make the app:
+   `common/wine/make-app.sh generals/wine/app "$HOME/Games/Command and Conquer Generals Zero Hour/Wine" "<Zero Hour Wine game folder>/GeneralsZH.ico"`.
+8. Start the app. It sets the My Documents link and adds the links to
+   `Game Data` before it starts the game.
+
+Check (2026-10-05): in a new prefix in the Linux test VM, `prefix.reg`
+imports with the same values as the installed prefix. `make-app.sh` makes an app with the same `Info.plist`
+and launcher as the installed one. The icon is different: the installed
+icon was made in another way that was not recorded.
+
+## Results
+
+| Test | Result |
+|---|---|
+| Mac, 2026-10-05 | The loading screen and the 3D battle behind the main menu show. Loading takes about 2 minutes. The menu buttons and a game were not tested. |
+| Linux test VM, 2026-10-05 | 3D shell map behind the main menu. |
+| `WorldBuilder.exe` in the Linux test VM, 2026-10-05 | Starts (MFC42 works). After EA's license dialog (accepted in the VM copy), the editor opens with the 3D terrain view and its tool windows. On the Mac the dialog still comes up once. |

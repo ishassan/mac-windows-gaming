@@ -1,0 +1,22 @@
+REGEDIT4
+
+; Settings of the Generals Zero Hour Wine prefix. Import: wine regedit /S prefix.reg
+
+[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Electronic Arts\EA Games\Generals]
+"InstallPath"="C:\\EA Games\\Command and Conquer Generals\\"
+"Language"="english"
+"MapPackVersion"=dword:00010000
+"Version"=dword:00010004
+
+[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Electronic Arts\EA Games\Command and Conquer Generals Zero Hour]
+"InstallPath"="C:\\EA Games\\Command and Conquer Generals Zero Hour\\"
+"Language"="english"
+"MapPackVersion"=dword:00010000
+"Version"=dword:00010004
+
+; With the default renderer, the screen stays black after the loading screen.
+[HKEY_CURRENT_USER\Software\Wine\Direct3D]
+"renderer"="gl"
+
+[HKEY_CURRENT_USER\Software\Wine\Mac Driver]
+"LeftCommandIsCtrl"="Y"

@@ -1,0 +1,6 @@
+30 key Escape
+40 key Escape
+50 key Escape
+60 key Escape
+70 key Escape
+80 key Escape

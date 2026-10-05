@@ -1,0 +1,10 @@
+REGEDIT4
+
+; Settings of the Revenant Wine prefix. Import: wine regedit /S prefix.reg
+
+; The Wine DirectDraw, not a replacement ddraw.dll
+[HKEY_CURRENT_USER\Software\Wine\DllOverrides]
+"ddraw"="builtin"
+
+[HKEY_CURRENT_USER\Software\Wine\Mac Driver]
+"ForceOpenGLBackingStore"="y"

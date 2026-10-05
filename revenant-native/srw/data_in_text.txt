@@ -1,5 +1,0 @@
-# Data inside .text (see common/tools/gen_relocs.py).
-# <start> <length>
-# DirectInput c_dfDIJoystick object table (44 DIOBJECTDATAFORMAT entries, from
-# dinput.lib); the DIDATAFORMAT at 0x5ba0dc points to it.
-58a3b0 0x2c0

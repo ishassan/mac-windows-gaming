@@ -1,0 +1,16 @@
+REGEDIT4
+
+; Settings of the Commandos Wine prefix. Import: wine regedit /S prefix.reg
+
+; cnc-ddraw (ddraw.dll in windows/syswow64) before the Wine DirectDraw
+[HKEY_CURRENT_USER\Software\Wine\DllOverrides]
+"ddraw"="native,builtin"
+
+[HKEY_CURRENT_USER\Software\Wine\Direct3D]
+"renderer"="gl"
+
+[HKEY_CURRENT_USER\Software\Wine\Mac Driver]
+"LeftCommandIsCtrl"="Y"
+"LeftOptionIsAlt"="Y"
+"RightCommandIsCtrl"="Y"
+"RightOptionIsAlt"="Y"
