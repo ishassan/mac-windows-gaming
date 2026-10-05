@@ -47,7 +47,7 @@ interface IDirect3DDevice3
     MultiplyTransform dtstTransformStateType *lpD3DMatrix
     DrawPrimitive dptPrimitiveType dwVertexTypeDesc *lpvVertices dwVertexCount dwFlags
     DrawIndexedPrimitive d3dptPrimitiveType dwVertexTypeDesc *lpvVertices dwVertexCount *lpwIndices dwIndexCount dwFlags
-    SetClipStatus *lpD3DClipStatus = 0
+    SetClipStatus *lpD3DClipStatus
     GetClipStatus *lpD3DClipStatus
     DrawPrimitiveStrided dptPrimitiveType dwVertexTypeDesc *lpVertexArray dwVertexCount dwFlags
     DrawIndexedPrimitiveStrided d3dptPrimitiveType dwVertexTypeDesc *lpVertexArray dwVertexCount *lpwIndices dwIndexCount dwFlags

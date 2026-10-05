@@ -4,13 +4,19 @@
  *  Fonts (CreateFontA, CreateFontIndirectA) use the installed macOS font
  *  with the same name (Arial, Times New Roman, ...). CoreText finds the
  *  font file and gives the text metrics. FreeType draws the glyphs with
- *  the hints (TrueType instructions) of the font, without antialiasing, as
- *  GDI does for small text. Games draw text on surfaces with a color key
- *  and then blit them, so soft edges would mix with the key color. Without
- *  the hints, thin strokes of small text (the top of "e" in 12-pixel
- *  Arial) cover less than half of a pixel row and are lost. When FreeType
- *  cannot open the font file, CoreText draws the glyphs (a pixel is on when
- *  it is at least half covered).
+ *  the hints (TrueType instructions) of the font. Without the hints, thin
+ *  strokes of small text (the top of "e" in 12-pixel Arial) cover less
+ *  than half of a pixel row and are lost.
+ *  Smooth (grayscale) edges, as GDI with font smoothing and Wine: only at
+ *  the sizes where the font's "gasp" table asks for them (for example
+ *  20-pixel Times New Roman); other sizes have hard edges. lfQuality
+ *  NONANTIALIASED_QUALITY and ANTIALIASED_QUALITY override the table. An
+ *  edge pixel mixes the text color with the pixel below it. Games draw
+ *  text on surfaces with a color key and then blit them: where the pixel
+ *  below has the key color, the edge mixes with black instead, so that no
+ *  key-colored fringe shows (Wine mixes with the key color).
+ *  When FreeType cannot open the font file, CoreText draws the glyphs (a
+ *  pixel is on when it is at least half covered).
  *  The text metrics and advances are whole pixels, as in GDI.
  *
  *  A device context (DC) is one of:
@@ -28,6 +34,7 @@
 #include <CoreGraphics/CoreGraphics.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_GASP_H
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -66,9 +73,13 @@
 
 EXTERN_C int DDraw_SurfaceInfo4(void *surface, uint8_t **pixels, int *pitch, int *width, int *height, uint32_t *caps,
                                 void **zbuffer, uint32_t *texture, uint8_t *pf);
+EXTERN_C int DDraw_SurfaceColorKey(void *surface, uint32_t *low, uint32_t *high);
+
+#define NONANTIALIASED_QUALITY 3
+#define ANTIALIASED_QUALITY    4
 
 typedef struct {
-    uint8_t *bits;        /* coverage >= 50%: 1, else 0; w x h */
+    uint8_t *bits;        /* coverage 0..255 (hard edges: 0 or 255); w x h */
     int w, h;             /* bitmap size */
     int left, top;        /* bitmap position from the pen (top: from the cell top) */
     int advance;
@@ -77,6 +88,7 @@ typedef struct {
 typedef struct {
     CTFontRef ct;
     FT_Face ft;           /* NULL: CoreText draws the glyphs */
+    int gray;             /* smooth edges (FreeType glyphs only) */
     int height;           /* tmHeight = ascent + descent */
     int ascent, descent, internal_leading, external_leading;
     int ave_width, max_width, weight, italic, underline, strikeout, charset, pitch_family;
@@ -186,7 +198,7 @@ static int advance_of(gdi_font *f, uint8_t c)
     {
         /* the hinted advance, as GDI */
         FT_UInt index = FT_Get_Char_Index(f->ft, u);
-        if (index == 0 || FT_Load_Glyph(f->ft, index, FT_LOAD_TARGET_MONO) != 0) return 0;
+        if (index == 0 || FT_Load_Glyph(f->ft, index, f->gray ? FT_LOAD_TARGET_NORMAL : FT_LOAD_TARGET_MONO) != 0) return 0;
         return (int)((f->ft->glyph->advance.x + 32) >> 6);
     }
     if (!CTFontGetGlyphsForCharacters(f->ct, &u, &g, 1)) return 0;
@@ -195,7 +207,7 @@ static int advance_of(gdi_font *f, uint8_t c)
 }
 
 static uint32_t create_font(int32_t height, int32_t width, int32_t weight, int italic, int underline, int strikeout,
-                            int charset, int pitch_family, const char *face)
+                            int charset, int quality, int pitch_family, const char *face)
 {
     gdi_font *f = (gdi_font *)calloc(1, sizeof(gdi_font));
     double size;
@@ -216,6 +228,14 @@ static uint32_t create_font(int32_t height, int32_t width, int32_t weight, int i
     if (f->internal_leading < 0) f->internal_leading = 0;
     f->external_leading = (int)lround(CTFontGetLeading(f->ct));
     f->ft = open_ft_face(f->ct, height);
+    if (f->ft)
+    {
+        /* as Wine: no gasp table, or the gasp range of this size has DO_GRAY */
+        FT_Int gasp = FT_Get_Gasp(f->ft, f->ft->size->metrics.y_ppem);
+        f->gray = (gasp == FT_GASP_NO_TABLE) || (gasp & FT_GASP_DO_GRAY);
+        if (quality == NONANTIALIASED_QUALITY) f->gray = 0;
+        if (quality == ANTIALIASED_QUALITY) f->gray = 1;
+    }
     f->weight = weight ? weight : 400;
     f->italic = italic;
     f->underline = underline;
@@ -232,9 +252,9 @@ static uint32_t create_font(int32_t height, int32_t width, int32_t weight, int i
     while (fonts.count(h)) h = (h >= FONT_LAST) ? FONT_FIRST : h + 4;
     next_font = (h >= FONT_LAST) ? FONT_FIRST : h + 4;
     fonts[h] = f;
-    if (trace()) fprintf(stderr, "GDI: CreateFont \"%s\" height %d weight %d -> 0x%x (cell %d, ascent %d, ave %d, %s)\n",
+    if (trace()) fprintf(stderr, "GDI: CreateFont \"%s\" height %d weight %d -> 0x%x (cell %d, ascent %d, ave %d, %s, %s edges)\n",
                          f->face, height, weight, h, f->height, f->ascent, f->ave_width,
-                         f->ft ? FT_Get_Postscript_Name(f->ft) : "CoreText glyphs");
+                         f->ft ? FT_Get_Postscript_Name(f->ft) : "CoreText glyphs", f->gray ? "smooth" : "hard");
     return h;
 }
 
@@ -261,9 +281,11 @@ static glyph *glyph_of(gdi_font *f, uint8_t c)
     if (f->ft)
     {
         FT_UInt index = FT_Get_Char_Index(f->ft, u);
-        if (c < 32 || index == 0 || FT_Load_Glyph(f->ft, index, FT_LOAD_RENDER | FT_LOAD_TARGET_MONO) != 0) return g;
+        if (c < 32 || index == 0 ||
+            FT_Load_Glyph(f->ft, index, FT_LOAD_RENDER | (f->gray ? FT_LOAD_TARGET_NORMAL : FT_LOAD_TARGET_MONO)) != 0) return g;
         FT_Bitmap *bm = &f->ft->glyph->bitmap;
-        if (bm->pixel_mode != FT_PIXEL_MODE_MONO || bm->width == 0 || bm->rows == 0) return g;
+        int mono = bm->pixel_mode == FT_PIXEL_MODE_MONO;
+        if ((!mono && bm->pixel_mode != FT_PIXEL_MODE_GRAY) || bm->width == 0 || bm->rows == 0) return g;
         g->w = (int)bm->width;
         g->h = (int)bm->rows;
         g->left = f->ft->glyph->bitmap_left;
@@ -272,7 +294,11 @@ static glyph *glyph_of(gdi_font *f, uint8_t c)
         for (int y = 0; y < g->h; y++)
         {
             const uint8_t *row = bm->buffer + y * bm->pitch;
-            for (int x = 0; x < g->w; x++) g->bits[y * g->w + x] = (row[x >> 3] >> (7 - (x & 7))) & 1;
+            for (int x = 0; x < g->w; x++)
+            {
+                if (mono) g->bits[y * g->w + x] = ((row[x >> 3] >> (7 - (x & 7))) & 1) ? 255 : 0;
+                else g->bits[y * g->w + x] = (uint8_t)(row[x] * 255 / (bm->num_grays - 1));
+            }
         }
         return g;
     }
@@ -299,7 +325,7 @@ static glyph *glyph_of(gdi_font *f, uint8_t c)
     CGContextRelease(ctx);
     /* the context has its origin at the bottom: row 0 of the memory is the top */
     g->bits = (uint8_t *)malloc(g->w * g->h);
-    for (int i = 0; i < g->w * g->h; i++) g->bits[i] = cov[i] >= 128;
+    for (int i = 0; i < g->w * g->h; i++) g->bits[i] = (cov[i] >= 128) ? 255 : 0;
     free(cov);
     return g;
 }
@@ -370,6 +396,10 @@ typedef struct {
     int pitch, width, height, bpp;
     uint32_t fg, bg;
     int clip_x0, clip_y0, clip_x1, clip_y1;
+    uint32_t mask[3];          /* red, green, blue masks of the surface */
+    uint8_t fg_rgb[3];         /* the text color, 8 bits per channel */
+    int has_key;
+    uint32_t key_low, key_high;
 } target;
 
 static int open_target(gdi_dc *d, target *t)
@@ -385,6 +415,12 @@ static int open_target(gdi_dc *d, target *t)
     }
     t->fg = pixel_of(pf, d->text_color);
     t->bg = pixel_of(pf, d->bk_color);
+    for (int i = 0; i < 3; i++)
+    {
+        t->mask[i] = rd32(pf + 16 + 4 * i);
+        t->fg_rgb[i] = (uint8_t)(d->text_color >> (8 * i));
+    }
+    t->has_key = DDraw_SurfaceColorKey(d->surface, &t->key_low, &t->key_high);
     t->clip_x0 = 0;
     t->clip_y0 = 0;
     t->clip_x1 = t->width;
@@ -398,6 +434,28 @@ static void put(target *t, int x, int y, uint32_t v)
     uint8_t *p = t->pixels + y * t->pitch;
     if (t->bpp == 16) ((uint16_t *)p)[x] = (uint16_t)v;
     else ((uint32_t *)p)[x] = v;
+}
+
+/* An edge pixel: the text color over the pixel below with coverage a (1..254) */
+static void blend(target *t, int x, int y, int a)
+{
+    if (x < t->clip_x0 || y < t->clip_y0 || x >= t->clip_x1 || y >= t->clip_y1) return;
+    uint8_t *p = t->pixels + y * t->pitch;
+    uint32_t old = (t->bpp == 16) ? ((uint16_t *)p)[x] : ((uint32_t *)p)[x];
+    int keyed = t->has_key && old >= t->key_low && old <= t->key_high;
+    uint32_t v = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        uint32_t m = t->mask[i];
+        int bits = mask_bits(m), shift = mask_shift(m);
+        if (bits == 0) continue;
+        uint32_t maxv = (1u << bits) - 1;
+        uint32_t below = keyed ? 0 : (((old & m) >> shift) * 255 + maxv / 2) / maxv;
+        uint32_t c = (t->fg_rgb[i] * (uint32_t)a + below * (uint32_t)(255 - a) + 127) / 255;
+        v |= ((c * maxv + 127) / 255) << shift;
+    }
+    if (t->bpp == 16) ((uint16_t *)p)[x] = (uint16_t)v;
+    else ((uint32_t *)p)[x] = v | (old & ~(t->mask[0] | t->mask[1] | t->mask[2]));
 }
 
 static int text_width(gdi_dc *d, gdi_font *f, const uint8_t *s, int n)
@@ -426,7 +484,8 @@ static void draw_line(gdi_dc *d, gdi_font *f, target *t, int x, int y, const uin
             const uint8_t *row = g->bits + gy * g->w;
             for (int gx = 0; gx < g->w; gx++)
             {
-                if (row[gx]) put(t, x + g->left + gx, y + g->top + gy, t->fg);
+                if (row[gx] == 255) put(t, x + g->left + gx, y + g->top + gy, t->fg);
+                else if (row[gx]) blend(t, x + g->left + gx, y + g->top + gy, row[gx]);
             }
         }
         if (f->underline)
@@ -443,7 +502,7 @@ static gdi_font *selected_font(gdi_dc *d)
     if (f == NULL)
     {
         static uint32_t system_font;
-        if (system_font == 0) system_font = create_font(16, 0, 700, 0, 0, 0, 0, 0, "Arial");
+        if (system_font == 0) system_font = create_font(16, 0, 700, 0, 0, 0, 0, 0, 0, "Arial");
         f = font_of(system_font);
     }
     return f;
@@ -454,7 +513,7 @@ static gdi_font *selected_font(gdi_dc *d)
 EXTERN_C void *CreateFontA_c(int32_t h, int32_t w, int32_t e, int32_t o, int32_t weight, uint32_t i, uint32_t u, uint32_t s,
                              uint32_t cs, uint32_t op, uint32_t cp, uint32_t q, uint32_t pf, const char *face)
 {
-    return guest_value(create_font(h, w, weight, i != 0, u != 0, s != 0, cs, pf, face));
+    return guest_value(create_font(h, w, weight, i != 0, u != 0, s != 0, cs, q, pf, face));
 }
 
 EXTERN_C void *CCALL CreateFontIndirectA_c(void *lplf)
@@ -465,7 +524,7 @@ EXTERN_C void *CCALL CreateFontIndirectA_c(void *lplf)
     memcpy(face, lf + 28, 32);
     face[32] = 0;
     return guest_value(create_font((int32_t)rd32(lf), (int32_t)rd32(lf + 4), (int32_t)rd32(lf + 16),
-                                   lf[20], lf[21], lf[22], lf[23], lf[27], face));
+                                   lf[20], lf[21], lf[22], lf[23], lf[26], lf[27], face));
 }
 
 EXTERN_C uint32_t CCALL DeleteObject_c(void *hObject)

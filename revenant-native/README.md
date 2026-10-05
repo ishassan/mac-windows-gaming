@@ -21,7 +21,8 @@ own frames:
 | New game: the Keep, walking, talking (dialog choices) | Work. |
 | Speech (MP3 samples in `resources.rvr`) | Plays (decoded with macOS AudioToolbox). Not checked by ear. |
 | 3D characters (Direct3D 6 on the software rasterizer) | Drawn with smooth light, as with a 3D card (see "3D renderer" below). |
-| Text (GDI fonts on surfaces: dialogs, messages, stats) | Drawn with the macOS fonts of the same name (Times New Roman, Arial) and their hints, as on Windows. |
+| Text (GDI fonts on surfaces: dialogs, messages, stats) | Drawn with the macOS fonts of the same name (Times New Roman, Arial) and their hints. Smooth edges at the sizes where the font asks for them (its "gasp" table), as Wine and GDI with font smoothing do: the dialog text has smooth edges. |
+| 3D figure on the inventory screen | Clean when it moves. (Before 2026-10-05 it left old poses on the screen: the game repaints the screen area that Direct3D reports in `GetClipStatus`, and the port reported no area.) |
 | Mouse cursor | Only the game cursor shows (the Mac cursor is hidden). |
 | Load game | Works (a GOG save in Misthaven loads). |
 | Save game into a new slot | Works (typed name, `Save/Single/<name>` is written). |

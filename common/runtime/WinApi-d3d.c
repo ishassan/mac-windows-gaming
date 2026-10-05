@@ -74,6 +74,7 @@ static int same_guid(const void *riid, uint32_t d1)
 static float rdf(const void *p) { float f; memcpy(&f, p, 4); return f; }
 static void wrf(void *p, float f) { memcpy(p, &f, 4); }
 static float u2f(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
+static uint32_t f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 
 /* ------------------------------------------------------------------ objects */
 
@@ -128,6 +129,14 @@ typedef struct d3d_device {
     float wvp[16];              /* world * view * projection */
     uint32_t begin_type, begin_fvf, begin_count;
     uint8_t *begin_buf;
+    uint32_t begin_flags;
+    /* D3DCLIPSTATUS: the screen extents of what DrawPrimitive drew since the
+     * last SetClipStatus (minx, maxx, miny, maxy, minz, maxz). The game
+     * reads them after each object and repaints that screen area in the
+     * next frame, so empty extents leave old pictures on the screen. */
+    uint32_t clip_status;
+    float extents[6];
+    int no_extents;             /* D3DDP_DONOTUPDATEEXTENTS for this draw */
 } d3d_device;
 
 typedef struct d3d_direct3d {
@@ -363,6 +372,9 @@ static void reset_device_state(d3d_device *d)
     identity(d->view);
     identity(d->proj);
     d->matrices_dirty = 1;
+    d->clip_status = 0;
+    d->extents[0] = d->extents[2] = d->extents[4] = 1e30f;
+    d->extents[1] = d->extents[3] = d->extents[5] = -1e30f;
 }
 
 EXTERN_C uint32_t IDirect3D3_CreateDevice_c(d3d_direct3d *o, void *rclsid, void *surface, uint32_t *out, void *u)
@@ -1267,6 +1279,19 @@ static void draw_triangle_clip(d3d_device *d, vtx *a, vtx *b, vtx *c, int pretra
             to_screen(d, &poly[i]);
         }
     }
+    if (!d->no_extents)
+    {
+        float *e = d->extents;
+        for (int i = 0; i < n; i++)
+        {
+            if (poly[i].sx < e[0]) e[0] = poly[i].sx;
+            if (poly[i].sx > e[1]) e[1] = poly[i].sx;
+            if (poly[i].sy < e[2]) e[2] = poly[i].sy;
+            if (poly[i].sy > e[3]) e[3] = poly[i].sy;
+            if (poly[i].sz < e[4]) e[4] = poly[i].sz;
+            if (poly[i].sz > e[5]) e[5] = poly[i].sz;
+        }
+    }
     /* culling in screen space (y down): D3D culls CCW by default */
     float cross = (poly[1].sx - poly[0].sx) * (poly[2].sy - poly[0].sy) - (poly[2].sx - poly[0].sx) * (poly[1].sy - poly[0].sy);
     uint32_t cull = d->rs[22];
@@ -1708,20 +1733,48 @@ EXTERN_C uint32_t IDirect3DDevice3_MultiplyTransform_c(d3d_device *d, uint32_t t
     return D3D_OK;
 }
 
+/* D3DDP_DONOTUPDATEEXTENTS: the draw does not change the clip status extents */
+#define D3DDP_DONOTUPDATEEXTENTS 0x8
+
 EXTERN_C uint32_t IDirect3DDevice3_DrawPrimitive_c(d3d_device *d, uint32_t type, uint32_t fvf, uint8_t *verts, uint32_t count, uint32_t flags)
 {
+    d->no_extents = (flags & D3DDP_DONOTUPDATEEXTENTS) != 0;
     return draw_primitive(d, type, fvf, verts, count, NULL, 0);
 }
 
 EXTERN_C uint32_t IDirect3DDevice3_DrawIndexedPrimitive_c(d3d_device *d, uint32_t type, uint32_t fvf, uint8_t *verts, uint32_t count,
                                                           uint16_t *indices, uint32_t icount, uint32_t flags)
 {
+    d->no_extents = (flags & D3DDP_DONOTUPDATEEXTENTS) != 0;
     return draw_primitive(d, type, fvf, verts, count, indices, icount);
+}
+
+/* D3DCLIPSTATUS: dwFlags, dwStatus, minx, maxx, miny, maxy, minz, maxz */
+#define D3DCLIPSTATUS_STATUS   0x1
+#define D3DCLIPSTATUS_EXTENTS2 0x2
+#define D3DCLIPSTATUS_EXTENTS3 0x4
+
+EXTERN_C uint32_t IDirect3DDevice3_SetClipStatus_c(d3d_device *d, uint8_t *cs)
+{
+    if (cs == NULL) return DDERR_INVALIDPARAMS;
+    uint32_t flags = rd32(cs);
+    if (flags & D3DCLIPSTATUS_STATUS) d->clip_status = rd32(cs + 4);
+    if (flags & (D3DCLIPSTATUS_EXTENTS2 | D3DCLIPSTATUS_EXTENTS3))
+    {
+        for (int i = 0; i < 4; i++) d->extents[i] = u2f(rd32(cs + 8 + 4 * i));
+        if (flags & D3DCLIPSTATUS_EXTENTS3) { d->extents[4] = u2f(rd32(cs + 24)); d->extents[5] = u2f(rd32(cs + 28)); }
+    }
+    TRACE2("D3D: SetClipStatus flags %x extents %.1f %.1f %.1f %.1f\n", flags, d->extents[0], d->extents[1], d->extents[2], d->extents[3]);
+    return D3D_OK;
 }
 
 EXTERN_C uint32_t IDirect3DDevice3_GetClipStatus_c(d3d_device *d, uint8_t *cs)
 {
-    if (cs) memset(cs, 0, 24);
+    if (cs == NULL) return DDERR_INVALIDPARAMS;
+    wr32(cs, D3DCLIPSTATUS_EXTENTS2);
+    wr32(cs + 4, d->clip_status);
+    for (int i = 0; i < 6; i++) wr32(cs + 8 + 4 * i, f2u(d->extents[i]));
+    TRACE2("D3D: GetClipStatus extents %.1f %.1f %.1f %.1f\n", d->extents[0], d->extents[1], d->extents[2], d->extents[3]);
     return D3D_OK;
 }
 
@@ -1733,6 +1786,7 @@ EXTERN_C uint32_t IDirect3DDevice3_Begin_c(d3d_device *d, uint32_t type, uint32_
     d->begin_type = type;
     d->begin_fvf = vertex_type_to_fvf(fvf);
     d->begin_count = 0;
+    d->begin_flags = flags;
     free(d->begin_buf);
     d->begin_buf = (uint8_t *)malloc((size_t)l.stride * 1024);
     return D3D_OK;
@@ -1749,6 +1803,7 @@ EXTERN_C uint32_t IDirect3DDevice3_Vertex_c(d3d_device *d, uint8_t *v)
 EXTERN_C uint32_t IDirect3DDevice3_End_c(d3d_device *d, uint32_t flags)
 {
     uint32_t r = D3D_OK;
+    d->no_extents = (d->begin_flags & D3DDP_DONOTUPDATEEXTENTS) != 0;
     if (d->begin_buf) r = draw_primitive(d, d->begin_type, d->begin_fvf, d->begin_buf, d->begin_count, NULL, 0);
     free(d->begin_buf);
     d->begin_buf = NULL;
