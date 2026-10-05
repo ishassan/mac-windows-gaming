@@ -1,7 +1,7 @@
 # Shared build rules for the native ports (static recompilation with M-HT/SR).
 #
 # A game folder has a Makefile with two lines:
-#     COMMON := ../../common/native-mac
+#     COMMON := ../../../common/native-mac
 #     include $(COMMON)/mk/game.mk
 # and these files:
 #     game.conf        GAME_NAME (program name), GAME_EXE (exe in the game
@@ -18,7 +18,7 @@
 #   make tools     build SRW and llasm into the shared build folder (once)
 #   make           translate the exe and build build/$(GAME_NAME)
 #
-# Run in the conda env of the repository (". ../../common/native-mac/tools/env.sh").
+# Run in the conda env of the repository (". ../../../common/native-mac/tools/env.sh").
 # GAME_DIR: folder with the original game (the exe is read from it).
 
 .DELETE_ON_ERROR:
@@ -27,7 +27,7 @@ SHELL       := /bin/bash
 
 include game.conf
 
-COMMON   ?= ../../common/native-mac
+COMMON   ?= ../../../common/native-mac
 TOOLS    := $(COMMON)/tools
 HOSTBIN  := $(COMMON)/../../build/bin
 GAME_DIR ?= $(HOME)/$(GAME_DIR_DEFAULT)

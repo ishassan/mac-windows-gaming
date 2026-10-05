@@ -3,7 +3,7 @@
 The original Windows Commandos (GOG) on Homebrew Wine. It is a reference
 for the native port ([../native-mac](../native-mac/README.md)). The parts
 that all Wine versions share (Wine, folder layout, the Miles fix, test
-methods) are in [../../common/wine](../../common/wine/README.md).
+methods) are in [../../../common/wine](../../../common/wine/README.md).
 
 ## Files here
 
@@ -66,7 +66,7 @@ the settings in it), not a recorded command history.
 2. Put the GOG game in `~/Games/Commandos Behind Enemy Lines/Game Data`.
 3. Make the prefix:
    `WINEPREFIX="$HOME/Games/Commandos Behind Enemy Lines/Wine/wineprefix" wineboot -i`.
-4. Settings (with the same `WINEPREFIX`): `wine regedit /S commandos-behind-enemy-lines/wine/prefix.reg`.
+4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/commandos-behind-enemy-lines/wine/prefix.reg`.
    It sets `ddraw=native,builtin`, the Direct3D renderer `gl`, and the Mac
    keys (Command as Ctrl, Option as Alt).
 5. Put cnc-ddraw's `ddraw.dll` into `<prefix>/drive_c/windows/syswow64`.
@@ -75,7 +75,7 @@ the settings in it), not a recorded command history.
 7. Patch Miles:
    `common/wine/patch-miles.py "<prefix>/drive_c/GOG Games/Commandos/MSS32.DLL"`.
 8. Make the app:
-   `common/wine/make-app.sh commandos-behind-enemy-lines/wine/app "$HOME/Games/Commandos Behind Enemy Lines/Wine" "$HOME/Games/Commandos Behind Enemy Lines/Game Data/goggame-1207662193.ico"`.
+   `common/wine/make-app.sh games/commandos-behind-enemy-lines/wine/app "$HOME/Games/Commandos Behind Enemy Lines/Wine" "$HOME/Games/Commandos Behind Enemy Lines/Game Data/goggame-1207662193.ico"`.
 9. Start the app. Start it before any other Wine program in this prefix:
    it sets the My Documents link first, else the game writes its saves
    into the Mac Documents folder (this happened once, on 2026-10-05).

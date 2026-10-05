@@ -4,7 +4,7 @@ A native arm64 macOS build of the GOG version of *Commandos: Behind Enemy Lines*
 It does not use Wine or Rosetta. The game's own x86 code (`comandos.exe`) is
 statically recompiled to arm64 with [M-HT/SR](https://github.com/M-HT/SR)
 (SRW, llasm, LLVM). The shared native layer in
-[`../../common/native-mac/runtime`](../../common/native-mac/README.md) (partly based on the SR Septerra
+[`../../../common/native-mac/runtime`](../../../common/native-mac/README.md) (partly based on the SR Septerra
 Core port, MIT license) replaces the Windows APIs with SDL2.
 
 Game data is not included. This repository never contains game files or
@@ -69,20 +69,20 @@ From the repository root (once): `conda env create -f environment.yml`,
 `. common/native-mac/tools/env.sh`, `common/native-mac/tools/install-ldc.sh`. Then:
 
 ```sh
-cd commandos-behind-enemy-lines/native-mac
-. ../../common/native-mac/tools/env.sh
+cd games/commandos-behind-enemy-lines/native-mac
+. ../../../common/native-mac/tools/env.sh
 make tools                                   # once for all games
 make                                         # reads comandos.exe from the game folder
 ./build/Commandos
-../../common/native-mac/macos/make-bundle.sh [output folder]   # default output folder: build
+../../../common/native-mac/macos/make-bundle.sh [output folder]   # default output folder: build
 ```
 
 All build tools come from the repository's conda env `mac-windows-gaming`
-(`../../environment.yml`). The LDC D compiler is not on conda-forge:
+(`../../../environment.yml`). The LDC D compiler is not on conda-forge:
 `common/native-mac/tools/install-ldc.sh` puts the official release into the env folder.
 `make` reads `comandos.exe` from `GAME_DIR` (default: the folder in
 `game.conf`) and writes everything it makes into `build/`. `make` stops if
-`CONDA_PREFIX` is not set (run `. ../../common/native-mac/tools/env.sh` first), so that
+`CONDA_PREFIX` is not set (run `. ../../../common/native-mac/tools/env.sh` first), so that
 SDL2 always comes from the env.
 
 `make-bundle.sh` copies the program, SDL2 (sdl2-compat) and SDL3 into
@@ -96,7 +96,7 @@ Environment variables for `build/Commandos`:
 | Variable | Effect |
 |----------|--------|
 | `COMMANDOS_DATA=<folder>` | Game folder. |
-| `COMMANDOS_SCRIPT=<file>` | Scripted input for tests: lines `<ms> move x y`, `click x y`, `rclick x y`, `key <name>` (`Ctrl+S` holds a modifier), `shot <name>`, `quit` and more. See `../../common/native-mac/runtime/input-script.c`. |
+| `COMMANDOS_SCRIPT=<file>` | Scripted input for tests: lines `<ms> move x y`, `click x y`, `rclick x y`, `key <name>` (`Ctrl+S` holds a modifier), `shot <name>`, `quit` and more. See `../../../common/native-mac/runtime/input-script.c`. |
 | `COMMANDOS_DUMP=<folder>` | Saves every 30th frame as BMP, and is the folder for `shot` (default `$TMPDIR`). |
 | `COMMANDOS_TRACE_FILES=1` | Logs file opens and searches. |
 | `COMMANDOS_TRACE_MSG=1` | Logs window messages, key state reads and key mapping calls. |
@@ -111,7 +111,7 @@ stack trace (only the first entry is always correct).
 ## Tools
 
 The tools (relocation finder, glue makers, disassembler, debug helpers) are
-shared: see [common/native-mac/README.md](../../common/native-mac/README.md).
+shared: see [common/native-mac/README.md](../../../common/native-mac/README.md).
 
 ## How it works
 
@@ -120,17 +120,17 @@ shared: see [common/native-mac/README.md](../../common/native-mac/README.md).
   address is the host address minus a fixed offset (`-ptrofs`).
 - The C runtime functions that SRW cannot translate well (memcpy jump tables,
   80-bit x87 helpers, printf float formatting) are replaced with native code
-  (`srw/llasm/*.sci`, `../../common/native-mac/runtime/llasm/c2asm-crt.llasm`).
+  (`srw/llasm/*.sci`, `../../../common/native-mac/runtime/llasm/c2asm-crt.llasm`).
 - The runtime implements kernel32, user32, gdi32, DirectDraw, winmm, a Miles
   Sound System layer on a native mixer, and the DirectShow multimedia stream
   (Cinepak and MS ADPCM decoders) that the game uses for its videos.
 - SRW can leave CPU flags uncomputed that a jump target reads (stale
-  flags). `../../common/native-mac/tools/check_flags.py` finds these places at each build,
+  flags). `../../../common/native-mac/tools/check_flags.py` finds these places at each build,
   and `srw/llasm/instruction_flags.sci` fixes them. One of them (at
   `0x60F2E4`) made the game crash after mission 1.
 
 ## License and credits
 
 - M-HT/SR and the runtime files from its Septerra Core port: Copyright (C) Roman Pauer, MIT license.
-- The files in this folder: MIT license (see [LICENSE](../../LICENSE)).
+- The files in this folder: MIT license (see [LICENSE](../../../LICENSE)).
 - *Commandos: Behind Enemy Lines* is a game by Pyro Studios. You need your own copy.

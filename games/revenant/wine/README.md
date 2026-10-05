@@ -3,7 +3,7 @@
 The original Windows Revenant (GOG, version 1.22) on Homebrew Wine. It is a
 reference for the native port ([../native-mac](../native-mac/README.md)).
 The parts that all Wine versions share (Wine, folder layout, the Miles fix,
-test methods) are in [../../common/wine](../../common/wine/README.md).
+test methods) are in [../../../common/wine](../../../common/wine/README.md).
 
 ## Files here
 
@@ -58,7 +58,7 @@ settings in it), not a recorded command history.
    native port also needs).
 3. Make the prefix:
    `WINEPREFIX="$HOME/Games/Revenant/Wine/wineprefix_cx" wineboot -i`.
-4. Settings (with the same `WINEPREFIX`): `wine regedit /S revenant/wine/prefix.reg`.
+4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/revenant/wine/prefix.reg`.
    It sets `ddraw=builtin` (the Wine DirectDraw, not a replacement
    `ddraw.dll`) and the Mac driver value `ForceOpenGLBackingStore=y`.
 5. Make `wineprefix_cx/drive_c/Revenant` and copy the Wine-only files above
@@ -68,13 +68,13 @@ settings in it), not a recorded command history.
    into `C:\Revenant`:
 
    ```
-   cd revenant/wine/dispmode-fix
+   cd games/revenant/wine/dispmode-fix
    i686-w64-mingw32-gcc -shared -o _inmm.dll dispmode_fix.c _inmm.def -luser32 -lkernel32 -O2
    ```
 
 7. Patch Miles: `common/wine/patch-miles.py "<prefix>/drive_c/Revenant/mss32.dll"`.
 8. Make the app:
-   `common/wine/make-app.sh revenant/wine/app "$HOME/Games/Revenant/Wine" "$HOME/Games/Revenant/Game Data/Revenant.icns"`.
+   `common/wine/make-app.sh games/revenant/wine/app "$HOME/Games/Revenant/Wine" "$HOME/Games/Revenant/Game Data/Revenant.icns"`.
 9. Start the app. At each start it adds a link for each new `Game Data`
    item.
 

@@ -4,7 +4,7 @@ A native arm64 macOS build of the GOG version of *Revenant* (Cinematix
 Studios, 1999). It does not use Wine or Rosetta. The game's own x86 code
 (`Revenant.exe`) is statically recompiled to arm64 with
 [M-HT/SR](https://github.com/M-HT/SR), and the shared native layer in
-[`../../common/native-mac/runtime`](../../common/native-mac/README.md) replaces the Windows APIs.
+[`../../../common/native-mac/runtime`](../../../common/native-mac/README.md) replaces the Windows APIs.
 
 Game data is not included. This repository never contains game files or
 code generated from them.
@@ -74,11 +74,11 @@ From the repository root (once): `conda env create -f environment.yml`,
 `. common/native-mac/tools/env.sh`, `common/native-mac/tools/install-ldc.sh`. Then:
 
 ```sh
-cd revenant/native-mac
-. ../../common/native-mac/tools/env.sh
+cd games/revenant/native-mac
+. ../../../common/native-mac/tools/env.sh
 make tools                       # once for all games
 make                             # reads Revenant.exe from ~/Games/Revenant/Game Data
-../../common/native-mac/macos/make-bundle.sh   # build/Revenant (Native).app
+../../../common/native-mac/macos/make-bundle.sh   # build/Revenant (Native).app
 ```
 
 `make GAME_DIR=<folder>` reads the exe from another folder.
@@ -127,6 +127,6 @@ stops for another version). They are in `srw/`:
 ## License and credits
 
 - M-HT/SR: Copyright (C) Roman Pauer, MIT license.
-- The files in this folder: MIT license (see [LICENSE](../../LICENSE)).
+- The files in this folder: MIT license (see [LICENSE](../../../LICENSE)).
 - *Revenant* is a game by Cinematix Studios, published by Eidos Interactive.
   You need your own copy.

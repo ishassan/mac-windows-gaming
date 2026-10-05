@@ -7,8 +7,8 @@ with a native layer. The ports use no Wine, no emulator and no Rosetta.
 Each game also has the setup of its original Windows version on Wine. We
 use it only as a reference, to compare with the native version.
 
-Each game has its own folder, named with the official game name in lowercase
-with hyphens (spaces break the build rules). It has two subfolders:
+Each game has its own folder in `games/`, named with the official game name in
+lowercase with hyphens (spaces break the build rules). It has two subfolders:
 
 - `native-mac/`: what makes the native Mac version work (for our ports: the
   build settings of the port).
@@ -28,9 +28,9 @@ the repository has a script that makes the change on your own copy.
 
 | Game | Native Mac | Wine (reference) | Native status |
 |------|------------|------------------|---------------|
-| Commandos: Behind Enemy Lines (1998) | [commandos-behind-enemy-lines/native-mac/](commandos-behind-enemy-lines/native-mac/) (our port) | [commandos-behind-enemy-lines/wine/](commandos-behind-enemy-lines/wine/) | Single-player works: videos, menus, missions, save and load. |
-| Revenant (1999) | [revenant/native-mac/](revenant/native-mac/) (our port) | [revenant/wine/](revenant/wine/) | Single-player works: intro video, menus, new game, walking and talking, load and save, music. Not played to the end. |
-| Command & Conquer Generals Zero Hour (2003) | [command-and-conquer-generals-zero-hour/native-mac/](command-and-conquer-generals-zero-hour/native-mac/) (a community port, not ours; our fork of it is the submodule `GeneralsX/`) | [command-and-conquer-generals-zero-hour/wine/](command-and-conquer-generals-zero-hour/wine/) | Reaches the main menu (community port 1.0.2). |
+| Commandos: Behind Enemy Lines (1998) | [games/commandos-behind-enemy-lines/native-mac/](games/commandos-behind-enemy-lines/native-mac/) (our port) | [games/commandos-behind-enemy-lines/wine/](games/commandos-behind-enemy-lines/wine/) | Single-player works: videos, menus, missions, save and load. |
+| Revenant (1999) | [games/revenant/native-mac/](games/revenant/native-mac/) (our port) | [games/revenant/wine/](games/revenant/wine/) | Single-player works: intro video, menus, new game, walking and talking, load and save, music. Not played to the end. |
+| Command & Conquer Generals Zero Hour (2003) | [games/command-and-conquer-generals-zero-hour/native-mac/](games/command-and-conquer-generals-zero-hour/native-mac/) (a community port, not ours; our fork of it is the submodule `GeneralsX/`) | [games/command-and-conquer-generals-zero-hour/wine/](games/command-and-conquer-generals-zero-hour/wine/) | Reaches the main menu (community port 1.0.2). |
 
 ## Layout
 
@@ -41,8 +41,8 @@ the repository has a script that makes the change on your own copy.
 | `common/native-mac/tools/` | Recompiler set-up, relocation finder, glue makers, debug helpers. |
 | `common/native-mac/runtime/` | The native Windows API layer (kernel32, user32, gdi32, DirectDraw, Direct3D, DirectInput, DirectPlay, Miles, Smacker, ...). |
 | `common/native-mac/macos/make-bundle.sh` | Makes the `.app` bundle of a game. |
-| `<game>/native-mac/` | Our ports: `game.conf` (names and folders), `runtime/game.h` (values for the runtime), `srw/` (recompiler settings for that exe), `macos/Info.plist`. |
-| `<game>/wine/` | The Wine version: `app/` (the app's launcher and `Info.plist`), `prefix.reg` (registry settings), patches, and a README with the Windows files that it needs and the setup steps. |
+| `games/<game>/native-mac/` | Our ports: `game.conf` (names and folders), `runtime/game.h` (values for the runtime), `srw/` (recompiler settings for that exe), `macos/Info.plist`. |
+| `games/<game>/wine/` | The Wine version: `app/` (the app's launcher and `Info.plist`), `prefix.reg` (registry settings), patches, and a README with the Windows files that it needs and the setup steps. |
 | `common/wine/` | Shared parts of the Wine versions: `make-app.sh` (makes a Wine app), `patch-miles.py` (the Miles sound fix), and the notes: see [common/wine/README.md](common/wine/README.md). |
 | `linux-test-vm/` | A Linux VM that runs the Wine versions on an in-memory screen, so a test takes no window from the Mac: see [linux-test-vm/README.md](linux-test-vm/README.md). |
 | `build/` | Shared tools that the build makes (SRW, llasm, the M-HT/SR sources). Not tracked. |
@@ -56,10 +56,10 @@ Nothing is installed globally.
 conda env create -f environment.yml   # an existing env: conda env update -f environment.yml
 . common/native-mac/tools/env.sh
 common/native-mac/tools/install-ldc.sh      # the D compiler for llasm (not on conda-forge)
-cd revenant/native-mac               # or commandos-behind-enemy-lines/native-mac
+cd games/revenant/native-mac               # or games/commandos-behind-enemy-lines/native-mac
 make tools                       # SRW and llasm, once for all games
 make                             # recompile the exe and build build/<Game>
-../../common/native-mac/macos/make-bundle.sh   # build/<Game> (Native).app
+../../../common/native-mac/macos/make-bundle.sh   # build/<Game> (Native).app
 ```
 
 The game folder's README has the data folder, the status and the debug
@@ -67,7 +67,7 @@ options of that game.
 
 ## Add a game
 
-1. Make a folder `<game>/native-mac/` with `game.conf`, `runtime/game.h`,
+1. Make a folder `games/<game>/native-mac/` with `game.conf`, `runtime/game.h`,
    `srw/SR.cfg`, `macos/Info.plist` and a two-line `Makefile`
    (copy them from a port that exists).
 2. Run `make`. Fix the recompiler errors with the files in `srw/`

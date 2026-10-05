@@ -25,7 +25,7 @@ settings (`game.conf`, `runtime/game.h`, `srw/`, `macos/Info.plist`).
 `mk/game.mk` has all rules. A game's `Makefile` is:
 
 ```make
-COMMON := ../../common/native-mac
+COMMON := ../../../common/native-mac
 include $(COMMON)/mk/game.mk
 ```
 

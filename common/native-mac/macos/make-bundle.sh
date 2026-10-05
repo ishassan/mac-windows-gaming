@@ -1,7 +1,7 @@
 #!/bin/bash
 # Make the app bundle "$APP_NAME.app" from build/$GAME_NAME of a game folder.
 #
-# Run in a game folder. Usage: ../../common/native-mac/macos/make-bundle.sh [output folder]
+# Run in a game folder. Usage: ../../../common/native-mac/macos/make-bundle.sh [output folder]
 # (default output folder: build)
 #
 # Uses from the game folder: game.conf (GAME_NAME, APP_NAME, APP_ICON_SOURCE,
