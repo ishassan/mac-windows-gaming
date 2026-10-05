@@ -15,6 +15,23 @@ version on Wine (the reference), see [../wine](../wine/README.md).
 - Download file: `macOS-GeneralsXZH.zip` from the GitHub release page.
 - The game data comes from the original Origin copy (base game and Zero Hour).
 
+## Source code (our fork)
+
+`GeneralsX/` in this folder is a git submodule: our fork of the port,
+https://github.com/ishassan/GeneralsX (made on 2026-10-05 from
+`fbraz3/GeneralsX`). This repository keeps only the link and the commit to
+use. The files are in the fork. The fork has the port's license (GPL 3 or
+later), not the MIT license of this repository.
+
+- Get the files: `git submodule update --init` (in the repository root).
+- Commit in use: tag `1.0.2` (`96cd64f`).
+- Plan for the branches in the fork:
+  - One branch for each general fix (for example the save text and the
+    water shaders). Each one can become a pull request to `fbraz3/GeneralsX`.
+  - One branch for our own changes (for example Cmd+Enter for full screen).
+    It stays in the fork, and we build the app from it.
+- The app that is installed now is still the downloaded 1.0.2 release.
+
 ## Folder layout
 
 ```

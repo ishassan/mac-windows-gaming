@@ -30,7 +30,7 @@ the repository has a script that makes the change on your own copy.
 |------|------------|------------------|---------------|
 | Commandos: Behind Enemy Lines (1998) | [commandos-behind-enemy-lines/native-mac/](commandos-behind-enemy-lines/native-mac/) (our port) | [commandos-behind-enemy-lines/wine/](commandos-behind-enemy-lines/wine/) | Single-player works: videos, menus, missions, save and load. |
 | Revenant (1999) | [revenant/native-mac/](revenant/native-mac/) (our port) | [revenant/wine/](revenant/wine/) | Single-player works: intro video, menus, new game, walking and talking, load and save, music. Not played to the end. |
-| Command & Conquer Generals Zero Hour (2003) | [command-and-conquer-generals-zero-hour/native-mac/](command-and-conquer-generals-zero-hour/native-mac/) (install notes for a community port, not ours) | [command-and-conquer-generals-zero-hour/wine/](command-and-conquer-generals-zero-hour/wine/) | Reaches the main menu (community port 1.0.2). |
+| Command & Conquer Generals Zero Hour (2003) | [command-and-conquer-generals-zero-hour/native-mac/](command-and-conquer-generals-zero-hour/native-mac/) (a community port, not ours; our fork of it is the submodule `GeneralsX/`) | [command-and-conquer-generals-zero-hour/wine/](command-and-conquer-generals-zero-hour/wine/) | Reaches the main menu (community port 1.0.2). |
 
 ## Layout
 
