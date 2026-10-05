@@ -52,8 +52,8 @@ Known limits:
 
 ## Play
 
-1. Install the GOG game. The default folder is `~/Games/Revenant` (the folder
-   with `resources.rvr`). Another folder: set `REVENANT_DATA`.
+1. Install the GOG game. The default folder is `~/Games/Revenant/Game Data`
+   (the folder with `resources.rvr`). Another folder: set `REVENANT_DATA`.
 2. Build the program and the app bundle (see below), then open
    `Revenant (Native).app`.
 
@@ -76,7 +76,7 @@ From the repository root (once): `conda env create -f environment.yml`,
 cd revenant-native
 . ../common/tools/env.sh
 make tools                       # once for all games
-make                             # reads Revenant.exe from ~/Games/Revenant
+make                             # reads Revenant.exe from ~/Games/Revenant/Game Data
 ../common/macos/make-bundle.sh   # build/Revenant (Native).app
 ```
 

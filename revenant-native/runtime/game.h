@@ -10,7 +10,7 @@
 #define GAME_SHORT_NAME   "Revenant"
 #define GAME_ENV_PREFIX   "REVENANT_"
 #define GAME_MODULE_PATH  "C:\\Revenant.exe"
-#define GAME_DATA_DEFAULT "Games/Revenant"
+#define GAME_DATA_DEFAULT "Games/Revenant/Game Data"
 #define GAME_DATA_CHECK   "resources.rvr"
 #define GAME_CONFIG_FILE  "Revenant-native.cfg"
 /* CD audio tracks (AIL_redbook_*, WinApi-mss32-redbook.c): track n is this file */
