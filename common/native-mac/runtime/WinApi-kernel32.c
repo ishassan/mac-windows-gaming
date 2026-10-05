@@ -140,8 +140,96 @@ static clockid_t monotonic_clock_id;
 
 
 #if !defined(_WIN32)
+// Port change: Windows (NTFS) gives the names of a folder in name order, and
+// readdir gives them in the order of the disk. Revenant shows its save list
+// in the order that it gets, so the search reads all names at once and sorts
+// them as NTFS does (compare of the upper-case letters).
 typedef struct {
-    DIR *dirinfo;
+    char *d_name;
+} sorted_entry;
+
+typedef struct {
+    sorted_entry *entries;
+    int count;
+    int next;
+} sorted_dir;
+
+static int ntfs_name_compare(const void *a, const void *b)
+{
+    const unsigned char *x = (const unsigned char *) ((const sorted_entry *)a)->d_name;
+    const unsigned char *y = (const unsigned char *) ((const sorted_entry *)b)->d_name;
+
+    while (*x != 0 && toupper(*x) == toupper(*y))
+    {
+        x++;
+        y++;
+    }
+    return toupper(*x) - toupper(*y);
+}
+
+static void sorted_closedir(sorted_dir *sd)
+{
+    int i;
+
+    for (i = 0; i < sd->count; i++)
+    {
+        free(sd->entries[i].d_name);
+    }
+    free(sd->entries);
+    free(sd);
+}
+
+static sorted_dir *sorted_opendir(const char *path)
+{
+    DIR *dir;
+    struct dirent *entry;
+    sorted_dir *sd;
+    sorted_entry *bigger;
+    int size = 0;
+
+    dir = opendir(path);
+    if (dir == NULL) return NULL;
+
+    sd = (sorted_dir *) calloc(1, sizeof(sorted_dir));
+    if (sd == NULL)
+    {
+        closedir(dir);
+        return NULL;
+    }
+
+    while ((entry = readdir(dir)) != NULL)
+    {
+        if (sd->count == size)
+        {
+            size = (size == 0) ? 64 : size * 2;
+            bigger = (sorted_entry *) realloc(sd->entries, size * sizeof(sorted_entry));
+            if (bigger == NULL) break;
+            sd->entries = bigger;
+        }
+        sd->entries[sd->count].d_name = strdup(entry->d_name);
+        if (sd->entries[sd->count].d_name == NULL) break;
+        sd->count++;
+    }
+    closedir(dir);
+
+    if (entry != NULL)
+    {
+        // out of memory
+        sorted_closedir(sd);
+        return NULL;
+    }
+
+    qsort(sd->entries, sd->count, sizeof(sorted_entry), ntfs_name_compare);
+    return sd;
+}
+
+static sorted_entry *sorted_readdir(sorted_dir *sd)
+{
+    return (sd->next < sd->count) ? &sd->entries[sd->next++] : NULL;
+}
+
+typedef struct {
+    sorted_dir *dirinfo;
     char *directory;
     char *filename;
 } find_file_state;
@@ -932,7 +1020,7 @@ uint32_t CCALL FindClose_c(void *hFindFile)
 
         if (state->dirinfo != NULL)
         {
-            closedir(state->dirinfo);
+            sorted_closedir(state->dirinfo);
             state->dirinfo = NULL;
         }
         if (state->directory != NULL)
@@ -990,8 +1078,8 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
 #else
     int readdirtype;
     struct stat filestat;
-    DIR *dirinfo;
-    struct dirent *direntry;
+    sorted_dir *dirinfo;
+    sorted_entry *direntry;
     find_file_state *state;
     const char *pattern, *slash;
     char *replace;
@@ -1031,17 +1119,17 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
         if (S_ISDIR(filestat.st_mode))
         {
             // directory
-            dirinfo = opendir(buf);
+            dirinfo = sorted_opendir(buf);
             if (dirinfo == NULL)
             {
                 Winapi_SetLastError(ERROR_ACCESS_DENIED);
                 return INVALID_HANDLE32_VALUE;
             }
 
-            direntry = readdir(dirinfo);
+            direntry = sorted_readdir(dirinfo);
             if (direntry == NULL)
             {
-                closedir(dirinfo);
+                sorted_closedir(dirinfo);
                 Winapi_SetLastError(ERROR_FILE_NOT_FOUND);
                 return INVALID_HANDLE32_VALUE;
             }
@@ -1100,7 +1188,7 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
             return INVALID_HANDLE32_VALUE;
         }
 
-        dirinfo = opendir(buf);
+        dirinfo = sorted_opendir(buf);
         if (dirinfo == NULL)
         {
             Winapi_SetLastError(ERROR_ACCESS_DENIED);
@@ -1117,17 +1205,17 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
             *replace = toupper(*replace);
         }
 
-        direntry = readdir(dirinfo);
+        direntry = sorted_readdir(dirinfo);
 
         // find first name matching pattern
         while (direntry != NULL && !file_pattern_match(direntry->d_name, orig_directory))
         {
-            direntry = readdir(dirinfo);
+            direntry = sorted_readdir(dirinfo);
         }
 
         if (direntry == NULL)
         {
-            closedir(dirinfo);
+            sorted_closedir(dirinfo);
             Winapi_SetLastError(ERROR_FILE_NOT_FOUND);
             return INVALID_HANDLE32_VALUE;
         }
@@ -1137,7 +1225,7 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
     ret = Winapi_AllocHandle();
     if (ret == NULL)
     {
-        if (dirinfo != NULL) closedir(dirinfo);
+        if (dirinfo != NULL) sorted_closedir(dirinfo);
         Winapi_SetLastError(ERROR_NOT_ENOUGH_MEMORY);
         return INVALID_HANDLE32_VALUE;
     }
@@ -1146,7 +1234,7 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
     if (state == NULL)
     {
         x86_free(ret);
-        if (dirinfo != NULL) closedir(dirinfo);
+        if (dirinfo != NULL) sorted_closedir(dirinfo);
         Winapi_SetLastError(ERROR_NOT_ENOUGH_MEMORY);
         return INVALID_HANDLE32_VALUE;
     }
@@ -1166,7 +1254,7 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
         {
             free(state);
             x86_free(ret);
-            if (dirinfo != NULL) closedir(dirinfo);
+            if (dirinfo != NULL) sorted_closedir(dirinfo);
             Winapi_SetLastError(ERROR_NOT_ENOUGH_MEMORY);
             return INVALID_HANDLE32_VALUE;
         }
@@ -1180,7 +1268,7 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
                 free(state->directory);
                 free(state);
                 x86_free(ret);
-                if (dirinfo != NULL) closedir(dirinfo);
+                if (dirinfo != NULL) sorted_closedir(dirinfo);
                 Winapi_SetLastError(ERROR_NOT_ENOUGH_MEMORY);
                 return INVALID_HANDLE32_VALUE;
             }
@@ -1194,7 +1282,7 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
             free(state->directory);
             free(state);
             x86_free(ret);
-            if (dirinfo != NULL) closedir(dirinfo);
+            if (dirinfo != NULL) sorted_closedir(dirinfo);
             Winapi_SetLastError(ERROR_ACCESS_DENIED);
             return INVALID_HANDLE32_VALUE;
         }
@@ -1232,7 +1320,7 @@ uint32_t CCALL FindNextFileA_c(void *hFindFile, void *lpFindFileData)
 #ifdef _WIN32
     return FindNextFileA((HANDLE)((handle)hFindFile)->sh.d, (LPWIN32_FIND_DATAA)lpFindFileData);
 #else
-    struct dirent *direntry;
+    sorted_entry *direntry;
     find_file_state *state;
     struct stat filestat;
     char buf[8192];
@@ -1245,16 +1333,16 @@ uint32_t CCALL FindNextFileA_c(void *hFindFile, void *lpFindFileData)
     }
     else if (state->filename == NULL)
     {
-        direntry = readdir(state->dirinfo);
+        direntry = sorted_readdir(state->dirinfo);
     }
     else
     {
-        direntry = readdir(state->dirinfo);
+        direntry = sorted_readdir(state->dirinfo);
 
         // find first name matching pattern
         while (direntry != NULL && !file_pattern_match(direntry->d_name, state->filename))
         {
-            direntry = readdir(state->dirinfo);
+            direntry = sorted_readdir(state->dirinfo);
         }
     }
 
@@ -1262,7 +1350,7 @@ uint32_t CCALL FindNextFileA_c(void *hFindFile, void *lpFindFileData)
     {
         if (state->dirinfo != NULL)
         {
-            closedir(state->dirinfo);
+            sorted_closedir(state->dirinfo);
             state->dirinfo = NULL;
         }
         if (state->directory != NULL)

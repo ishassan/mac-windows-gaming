@@ -83,7 +83,14 @@ imports with the same values as the installed prefix. `make-app.sh` makes an app
 installed one (the signature excluded). The display-mode fix builds from
 this source, with the same 178 exports as the installed `_inmm.dll`, but
 the file is not the same (112870 bytes, the installed one 112358 bytes).
-The cause was not checked.
+Cause: a newer compiler. The installed file was made with mingw-w64 13.0.0
+(GCC 15.2.0, binutils 2.45), the new one with mingw-w64 14.0.0 (GCC 16.1.0,
+binutils 2.46.1). Both have the same functions, the same text and log
+strings, the same exports and forwards, and the same calls and constants
+in the three fix functions. Only the stack layout, the register use and the
+linked mingw runtime code differ. On the Mac, Revenant (Wine) started with
+the new file: the fix loaded and set 960x600, and the game reached the main
+menu.
 
 ## The two fixes
 
@@ -131,5 +138,11 @@ port reads this value as `No` and draws the figures with Direct3D.
 - The game hangs at the start with no sound: the Miles fix is missing.
 - No window in front: use Cmd+Tab or Mission Control to find the Wine
   window.
+- `Launcher.exe` (Run Revenant, then Start Game in its Options window)
+  writes `revenant.ini` in `Game Data` again, with the values of that
+  window: with the device "DirectDraw HAL" it sets `Software3D=No`, removes
+  the empty lines and adds keys (`DisplayMode`, `Detail` and more). The
+  native app reads the same file. Keep a copy of `revenant.ini` before you
+  use the launcher (seen on 2026-10-05; the file was put back).
 - Revenant in the Linux test VM crashed in `smackw32.dll` without a sound
   device (see `linux-test-vm/README.md`).

@@ -75,8 +75,12 @@ fails with "rosetta error: invalid gdt selector index 4"), and all three
 games are 32-bit. FEX then runs every x86 program.
 
 `create` and `provision.sh` repeat the steps that made the VM on
-2026-10-05. They were not run end to end as scripts: the VM of 2026-10-05
-was made step by step.
+2026-10-05 (that VM was made step by step). Check of the scripts
+(2026-10-05): a second VM made with `create` (VM name changed in a copy of
+this folder) took about 10 minutes, received about 1.6 GB from the network
+(the Mac's network counter, so other traffic is included; the Ubuntu image
+is 0.95 GB of it), used 6.9 GB of disk, and showed the Revenant main menu
+in a test. That VM was then deleted.
 
 ## Results (2026-10-05, the Wine apps' own scripts and folders)
 
