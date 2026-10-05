@@ -1201,8 +1201,11 @@ static void to_screen(d3d_device *d, vtx *v)
         v->sx = (nx + 1) * 0.5f * cur_target.width;
         v->sy = (1 - ny) * 0.5f * cur_target.height;
     }
-    float minz = vp ? vp->min_z : 0, maxz = vp ? vp->max_z : 1;
-    v->sz = minz + nz * (maxz - minz);
+    /* The depth range is always 0..1, as in Wine (dlls/ddraw/viewport.c):
+     * a D3DVIEWPORT ignores dvMinZ/dvMaxZ (Revenant sets both to 0), and a
+     * D3DVIEWPORT2 maps dvMinZ..dvMaxZ to 0..1. */
+    v->sz = nz;
+    if (vp && vp->version != 1 && vp->max_z != vp->min_z) v->sz = (nz - vp->min_z) / (vp->max_z - vp->min_z);
     v->rhw = rhw;
 }
 

@@ -13,4 +13,5 @@ dependencies:
   - scons=4.11       # builds SRW and the game
   - llvm-tools=23    # llc/opt: compile llasm output to arm64
   - sdl2=2.32        # window, input, audio for the runtime layer
+  - freetype=2.13    # GDI text: glyphs with the font hints, as on Windows
   - python-unicorn=2.1  # x86 emulator: identify C runtime functions by running them

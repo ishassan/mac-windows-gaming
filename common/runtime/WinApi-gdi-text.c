@@ -2,11 +2,16 @@
  *  Native port: GDI fonts, device contexts and text, on macOS CoreText.
  *
  *  Fonts (CreateFontA, CreateFontIndirectA) use the installed macOS font
- *  with the same name (Arial, Times New Roman, ...). The text metrics and
- *  advances are whole pixels, as in GDI. Glyphs are drawn without
- *  antialiasing (a pixel is on when it is at least half covered), because
- *  games draw text on surfaces with a color key and then blit them: soft
- *  edges would mix with the key color.
+ *  with the same name (Arial, Times New Roman, ...). CoreText finds the
+ *  font file and gives the text metrics. FreeType draws the glyphs with
+ *  the hints (TrueType instructions) of the font, without antialiasing, as
+ *  GDI does for small text. Games draw text on surfaces with a color key
+ *  and then blit them, so soft edges would mix with the key color. Without
+ *  the hints, thin strokes of small text (the top of "e" in 12-pixel
+ *  Arial) cover less than half of a pixel row and are lost. When FreeType
+ *  cannot open the font file, CoreText draws the glyphs (a pixel is on when
+ *  it is at least half covered).
+ *  The text metrics and advances are whole pixels, as in GDI.
  *
  *  A device context (DC) is one of:
  *    - the DC of a DirectDraw surface (IDirectDrawSurface::GetDC): text is
@@ -21,6 +26,8 @@
 #include "game-info.h"
 #include <CoreText/CoreText.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -69,6 +76,7 @@ typedef struct {
 
 typedef struct {
     CTFontRef ct;
+    FT_Face ft;           /* NULL: CoreText draws the glyphs */
     int height;           /* tmHeight = ascent + descent */
     int ascent, descent, internal_leading, external_leading;
     int ave_width, max_width, weight, italic, underline, strikeout, charset, pitch_family;
@@ -133,11 +141,54 @@ static CTFontRef make_ct_font(const char *face, double size, int bold, int itali
     return f;
 }
 
+/* The FreeType face of the font file of a CoreText font, at the GDI height */
+static FT_Face open_ft_face(CTFontRef ct, int32_t height)
+{
+    static FT_Library lib;
+    char path[4096], ps[256];
+    FT_Face face = NULL;
+    if (lib == NULL && FT_Init_FreeType(&lib) != 0) return NULL;
+    CFURLRef url = (CFURLRef)CTFontCopyAttribute(ct, kCTFontURLAttribute);
+    CFStringRef name = CTFontCopyPostScriptName(ct);
+    int ok = url != NULL && CFURLGetFileSystemRepresentation(url, true, (UInt8 *)path, sizeof(path)) &&
+             name != NULL && CFStringGetCString(name, ps, sizeof(ps), kCFStringEncodingUTF8);
+    if (url) CFRelease(url);
+    if (name) CFRelease(name);
+    if (!ok) return NULL;
+    /* a collection file (.ttc) has more faces: take the one with the PostScript name */
+    for (FT_Long i = 0, n = 1; i < n; i++)
+    {
+        if (FT_New_Face(lib, path, i, &face) != 0) return NULL;
+        n = face->num_faces;
+        const char *fps = FT_Get_Postscript_Name(face);
+        if (n == 1 || (fps != NULL && strcmp(fps, ps) == 0)) break;
+        FT_Done_Face(face);
+        face = NULL;
+    }
+    if (face == NULL) return NULL;
+    /* GDI: a positive height is the cell height, a negative height the em height */
+    FT_Size_RequestRec req = { (height > 0) ? FT_SIZE_REQUEST_TYPE_CELL : FT_SIZE_REQUEST_TYPE_NOMINAL, 0,
+                               (FT_Long)((height > 0) ? height : -height) << 6, 0, 0 };
+    if (!FT_IS_SCALABLE(face) || FT_Request_Size(face, &req) != 0)
+    {
+        FT_Done_Face(face);
+        return NULL;
+    }
+    return face;
+}
+
 static int advance_of(gdi_font *f, uint8_t c)
 {
     UniChar u = unicode_of(c);
     CGGlyph g;
     CGSize adv;
+    if (f->ft)
+    {
+        /* the hinted advance, as GDI */
+        FT_UInt index = FT_Get_Char_Index(f->ft, u);
+        if (index == 0 || FT_Load_Glyph(f->ft, index, FT_LOAD_TARGET_MONO) != 0) return 0;
+        return (int)((f->ft->glyph->advance.x + 32) >> 6);
+    }
     if (!CTFontGetGlyphsForCharacters(f->ct, &u, &g, 1)) return 0;
     CTFontGetAdvancesForGlyphs(f->ct, kCTFontOrientationHorizontal, &g, &adv, 1);
     return (int)lround(adv.width);
@@ -164,6 +215,7 @@ static uint32_t create_font(int32_t height, int32_t width, int32_t weight, int i
     f->internal_leading = f->height - (int)lround(size);
     if (f->internal_leading < 0) f->internal_leading = 0;
     f->external_leading = (int)lround(CTFontGetLeading(f->ct));
+    f->ft = open_ft_face(f->ct, height);
     f->weight = weight ? weight : 400;
     f->italic = italic;
     f->underline = underline;
@@ -180,8 +232,9 @@ static uint32_t create_font(int32_t height, int32_t width, int32_t weight, int i
     while (fonts.count(h)) h = (h >= FONT_LAST) ? FONT_FIRST : h + 4;
     next_font = (h >= FONT_LAST) ? FONT_FIRST : h + 4;
     fonts[h] = f;
-    if (trace()) fprintf(stderr, "GDI: CreateFont \"%s\" height %d weight %d -> 0x%x (cell %d, ascent %d, ave %d)\n",
-                         f->face, height, weight, h, f->height, f->ascent, f->ave_width);
+    if (trace()) fprintf(stderr, "GDI: CreateFont \"%s\" height %d weight %d -> 0x%x (cell %d, ascent %d, ave %d, %s)\n",
+                         f->face, height, weight, h, f->height, f->ascent, f->ave_width,
+                         f->ft ? FT_Get_Postscript_Name(f->ft) : "CoreText glyphs");
     return h;
 }
 
@@ -192,6 +245,7 @@ static void free_font(gdi_font *f)
         if (f->glyphs[i]) free(f->glyphs[i]->bits);
         free(f->glyphs[i]);
     }
+    if (f->ft) FT_Done_Face(f->ft);
     CFRelease(f->ct);
     free(f);
 }
@@ -204,6 +258,24 @@ static glyph *glyph_of(gdi_font *f, uint8_t c)
     g->advance = advance_of(f, c);
     UniChar u = unicode_of(c);
     CGGlyph cg;
+    if (f->ft)
+    {
+        FT_UInt index = FT_Get_Char_Index(f->ft, u);
+        if (c < 32 || index == 0 || FT_Load_Glyph(f->ft, index, FT_LOAD_RENDER | FT_LOAD_TARGET_MONO) != 0) return g;
+        FT_Bitmap *bm = &f->ft->glyph->bitmap;
+        if (bm->pixel_mode != FT_PIXEL_MODE_MONO || bm->width == 0 || bm->rows == 0) return g;
+        g->w = (int)bm->width;
+        g->h = (int)bm->rows;
+        g->left = f->ft->glyph->bitmap_left;
+        g->top = f->ascent - f->ft->glyph->bitmap_top;
+        g->bits = (uint8_t *)malloc(g->w * g->h);
+        for (int y = 0; y < g->h; y++)
+        {
+            const uint8_t *row = bm->buffer + y * bm->pitch;
+            for (int x = 0; x < g->w; x++) g->bits[y * g->w + x] = (row[x >> 3] >> (7 - (x & 7))) & 1;
+        }
+        return g;
+    }
     if (c < 32 || !CTFontGetGlyphsForCharacters(f->ct, &u, &cg, 1)) return g;
 
     CGRect box = CTFontGetBoundingRectsForGlyphs(f->ct, kCTFontOrientationHorizontal, &cg, NULL, 1);
@@ -594,7 +666,8 @@ static void text_out(gdi_dc *d, int x, int y, const uint8_t *s, int n, const int
     if ((d->align & TA_BASELINE) == TA_BASELINE) y -= f->ascent;
     else if (d->align & TA_BOTTOM) y -= f->height;
     if (d->align & TA_UPDATECP) d->cur_x += w;
-    if (trace()) fprintf(stderr, "GDI: text at %d,%d \"%.*s\"%s\n", x, y, n, (const char *)s, d->surface ? "" : " (window DC, not drawn)");
+    if (trace()) fprintf(stderr, "GDI: text at %d,%d \"%.*s\" color 0x%06x%s%s\n", x, y, n, (const char *)s, d->text_color,
+                         (d->bk_mode == OPAQUE) ? " opaque" : "", d->surface ? "" : " (window DC, not drawn)");
     if (!open_target(d, &t)) return;
     if (clip)
     {

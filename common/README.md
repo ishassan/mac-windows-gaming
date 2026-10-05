@@ -65,12 +65,12 @@ becomes a trap, listed in `build/srw/srw-traps.txt`), and stages the output.
 | `WinApi-kernel32*.c`, `X86_FS_mem.c`, `CLIB.c` | Files, memory, time, INI files, threads, SEH, the C library. |
 | `WinApi-sync.c` | Events, mutexes, waits, threads (`CreateThread`), multimedia timers. |
 | `WinApi-user32.c`, `input-script.c` | Window, messages from SDL input, cursor, keyboard state; scripted input for tests. |
-| `WinApi-gdi32.c`, `WinApi-gdi-text.c` | GDI objects; fonts and text on DirectDraw surfaces with macOS CoreText. |
+| `WinApi-gdi32.c`, `WinApi-gdi-text.c` | GDI objects; fonts and text on DirectDraw surfaces. CoreText finds the macOS font of the same name and gives the metrics. FreeType draws the glyphs with the font hints and without antialiasing, as GDI does for small text. |
 | `WinApi-ddraw.c` | DirectDraw 1 to 4: surfaces, blits, color keys, palettes, display. |
-| `WinApi-d3d.c` | Direct3D 6 (IDirect3D3, IDirect3DDevice3) with a software rasterizer: transforms, lighting, textures, z-buffer, blending. |
+| `WinApi-d3d.c` | Direct3D 6 (IDirect3D3, IDirect3DDevice3) with a software rasterizer: transforms, lighting, textures, z-buffer, blending. The depth range is 0..1, as in Wine. |
 | `WinApi-dinput.c` | DirectInput 5: system keyboard and mouse (no joysticks). |
 | `WinApi-dplay.c` | DirectPlay 4 objects without network (for games that make them at start-up). |
-| `WinApi-mss32.c`, `WinApi-mss32-redbook.c`, `audio-mixer.c` | Miles Sound System on a native mixer; CD audio from audio files (macOS AudioToolbox). |
+| `WinApi-mss32.c`, `WinApi-mss32-redbook.c`, `audio-mixer.c`, `audio-decode.c` | Miles Sound System on a native mixer; MP3 samples in memory and CD audio from audio files (macOS AudioToolbox). |
 | `WinApi-smackw32.c` | Smacker video decoder and player. |
 | `WinApi-amstream.c`, `video-avi.c` | DirectShow multimedia stream: AVI with Cinepak and MS ADPCM. |
 | `WinApi-winmm.c`, `WinApi-misc.c` | winmm timers, COM, registry, shell functions. |
@@ -88,6 +88,11 @@ screen at the desktop size; 2 full screen with a display mode change). The
 player can change it with `Display_Mode=window`, `desktop` or `fullscreen`
 in the game's config file (`GAME_CONFIG_FILE` in `game.h`, in the game
 folder), which `runtime/Game-Config.c` reads.
+
+**INI overrides.** `GAME_INI_OVERRIDES` in a game's `game.h` lists INI
+values (section, key, value) that `GetPrivateProfileStringA` gives in place
+of the file. `WritePrivateProfileStringA` does not write these keys, so the
+file keeps the player's value.
 
 **VSync.** Off by default: with VSync, each screen update waits for the
 display refresh, and Commandos updates the screen at each mouse move (the

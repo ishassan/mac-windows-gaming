@@ -283,6 +283,17 @@ EXTERN_C uint32_t WritePrivateProfileStringA_c(const char *lpAppName, const char
     int c;
 
     if (lpAppName == NULL || lpFileName == NULL) return 0;
+#ifdef GAME_INI_OVERRIDES
+    /* a key that the port replaces on read (game.h) keeps its value in the file */
+    if (lpKeyName != NULL)
+    {
+        static const char *const overrides[][3] = { GAME_INI_OVERRIDES };
+        for (size_t i = 0; i < sizeof(overrides) / sizeof(overrides[0]); i++)
+        {
+            if (strcasecmp(lpAppName, overrides[i][0]) == 0 && strcasecmp(lpKeyName, overrides[i][1]) == 0) return 1;
+        }
+    }
+#endif
     CLIB_FindFile(lpFileName, path);
     if ((f = fopen(path, "rb")) != NULL)
     {

@@ -28,6 +28,9 @@ void Mixer_SetLoops(int id, int loops);
 double Mixer_Position(int id);   /* seconds from the start of the data */
 void Mixer_SetMaster(int volume);
 int Mixer_GetMaster(void);
+/* MP3 and other compressed images (audio-decode.c): *pcm is malloc'ed 16-bit data */
+int Mixer_DecodeImage(const uint8_t *img, uint32_t size, const char *type_hint,
+                      int16_t **pcm, uint32_t *bytes, int *rate, int *chans);
 int Mixer_ParseWav(const uint8_t *img, uint32_t size, const uint8_t **pcm, uint32_t *bytes, int *rate, int *bits, int *chans);
 
 #endif

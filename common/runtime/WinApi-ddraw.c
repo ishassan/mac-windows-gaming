@@ -129,6 +129,7 @@ EXTERN_C uint8_t IDirectDrawClipperVtbl_asm2c[];
 extern int Game_ClientWidth;
 extern int Game_ClientHeight;
 EXTERN_C int display_virtual_keyboard(SDL_Renderer *renderer);
+EXTERN_C void User32_ApplyCursorVisibility(void);
 
 /* ------------------------------------------------------------- display state */
 
@@ -182,6 +183,7 @@ static int create_display(int width, int height)
             fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
             return -1;
         }
+        User32_ApplyCursorVisibility();
         if (game_getenv("TRACE_DDRAW")) fprintf(stderr, "DirectDraw: window mode %d (0 window, 1 desktop, 2 full screen)\n", Display_Mode);
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | (Display_VSync ? SDL_RENDERER_PRESENTVSYNC : 0));
         if (renderer == NULL)
@@ -1453,7 +1455,7 @@ EXTERN_C uint32_t IDirectDrawSurface4_AddAttachedSurface_c(dds_t *s, dds_t *att)
 
 EXTERN_C uint32_t IDirectDrawSurface4_Blt_c(dds_t *s, void *dr, dds_t *src, void *sr, uint32_t f, uint8_t *fx)
 {
-    if ((s->caps & DDSCAPS_ZBUFFER) && (f & 0x00000800))   /* DDBLT_DEPTHFILL: fx->dwFillDepth at 80 */
+    if ((s->caps & DDSCAPS_ZBUFFER) && (f & 0x02000000))   /* DDBLT_DEPTHFILL: fx->dwFillDepth at 80 */
     {
         rect_t d;
         read_rect(dr, &d, s);

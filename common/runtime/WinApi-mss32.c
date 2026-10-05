@@ -1,7 +1,8 @@
 /*
  *  Port change: Miles Sound System (mss32.dll) functions that the game
  *  uses, on the native mixer (audio-mixer.c).
- *  Samples play WAV images in guest memory. Streams play WAV files from disk.
+ *  Samples play WAV images in guest memory (MP3 images through
+ *  audio-decode.c). Streams play WAV files from disk.
  *  CD audio is in WinApi-mss32-redbook.c.
  *  MIT license, see README.md.
  */
@@ -433,20 +434,35 @@ EXTERN_C uint32_t AIL_set_named_sample_file_c(uint32_t S, const char *file_type_
     int ch = channel_of(S);
 
     if (ch == 0 || file_image == NULL) return 0;
-    if (file_size == 0)
+    if (memcmp(file_image, "RIFF", 4) != 0)
     {
-        uint32_t riff_size;
-        memcpy(&riff_size, (uint8_t *)file_image + 4, 4);
-        file_size = riff_size + 8;
+        /* Not WAV (Revenant speech is MP3): Miles uses an ASI codec, here AudioToolbox */
+        int16_t *decoded;
+        if (file_size == 0 || Mixer_DecodeImage((const uint8_t *)file_image, file_size, file_type_suffix, &decoded, &bytes, &rate, &chans) != 0)
+        {
+            LOG_ONCE("Miles: sample format not supported (%s)\n", file_type_suffix ? file_type_suffix : "?");
+            return 0;
+        }
+        bits = 16;
+        Mixer_SetData(ch, decoded, bytes, rate, bits, chans, decoded);
     }
-    if (Mixer_ParseWav((const uint8_t *)file_image, file_size, &pcm, &bytes, &rate, &bits, &chans) != 0)
+    else
     {
-        LOG_ONCE("Miles: sample format not supported (%s)\n", file_type_suffix ? file_type_suffix : "?");
-        return 0;
+        if (file_size == 0)
+        {
+            uint32_t riff_size;
+            memcpy(&riff_size, (uint8_t *)file_image + 4, 4);
+            file_size = riff_size + 8;
+        }
+        if (Mixer_ParseWav((const uint8_t *)file_image, file_size, &pcm, &bytes, &rate, &bits, &chans) != 0)
+        {
+            LOG_ONCE("Miles: sample format not supported (%s)\n", file_type_suffix ? file_type_suffix : "?");
+            return 0;
+        }
+        Mixer_SetData(ch, pcm, bytes, rate, bits, chans, NULL);
     }
-    Mixer_SetData(ch, pcm, bytes, rate, bits, chans, NULL);
     handle_of(S)[12] = (uint32_t)((uint64_t)bytes * 1000 / ((uint64_t)rate * (bits / 8) * chans));
-    if (trace_sound()) fprintf(stderr, "Miles: named sample %u bytes, %d Hz, %d bit, %d ch\n", bytes, rate, bits, chans);
+    if (trace_sound()) fprintf(stderr, "Miles: named sample (%s) %u bytes, %d Hz, %d bit, %d ch\n", file_type_suffix ? file_type_suffix : "?", bytes, rate, bits, chans);
     return 1;
 }
 

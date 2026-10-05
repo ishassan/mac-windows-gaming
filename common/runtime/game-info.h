@@ -10,6 +10,11 @@
  *    GAME_DATA_DEFAULT  default game folder, relative to $HOME
  *    GAME_DATA_CHECK    a file that must be in the game folder
  *    GAME_CONFIG_FILE   configuration file of the runtime (in the game folder)
+ *  and optionally:
+ *    GAME_CD_TRACK_FILE  file name pattern of CD audio track n
+ *    GAME_DISPLAY_MODE   default display mode (0 window, 1 desktop, 2 full screen)
+ *    GAME_INI_OVERRIDES  { "section", "key", "value" }, ...: INI values that
+ *                        GetPrivateProfileStringA gives in place of the file
  */
 
 #ifndef NATIVE_GAME_INFO_H

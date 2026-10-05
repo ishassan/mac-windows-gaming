@@ -3424,6 +3424,15 @@ int32_t CCALL ShowCursor_c(uint32_t bShow)
     return cursor_visibility;
 }
 
+/* Port change: games call ShowCursor(FALSE) before the window exists. SDL
+ * starts its video part when the window is made, and that shows the cursor
+ * again (two cursors: the Mac one and the game's own). The display code
+ * calls this after it makes the window. */
+extern "C" void User32_ApplyCursorVisibility(void)
+{
+    SDL_ShowCursor((cursor_visibility >= 0) ? SDL_ENABLE : SDL_DISABLE);
+}
+
 uint32_t CCALL ShowWindow_c(void *hWnd, int32_t nCmdShow)
 {
     if (hWnd == PSEUDO_HANDLE_MAIN_WINDOW && !main_window_shown && nCmdShow != 0)

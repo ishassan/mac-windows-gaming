@@ -54,9 +54,12 @@ SDL_LIBS   := $(CONDA_PREFIX)/lib/libSDL2main.a $(CONDA_PREFIX)/lib/libSDL2-2.0.
               -Wl,-rpath,$(CONDA_PREFIX)/lib -Wl,-framework,Cocoa \
               -Wl,-framework,CoreText -Wl,-framework,CoreGraphics -Wl,-framework,CoreFoundation \
               -Wl,-framework,AudioToolbox
+# FreeType (GDI text) from the conda env; make-bundle.sh copies it and its libraries.
+FT_CFLAGS  := -I$(CONDA_PREFIX)/include/freetype2
+FT_LIBS    := $(CONDA_PREFIX)/lib/libfreetype.6.dylib
 EXTRA_LIBS ?=
 CXXFLAGS   := -arch arm64 -x c++ -std=c++17 -fpie -DPTROFS_64BIT -O2 -g -Wall -Wno-unused \
-              -Iruntime -Iruntime/llasm -I$(COMMON)/runtime -I$(COMMON)/runtime/llasm $(SDL_CFLAGS) \
+              -Iruntime -Iruntime/llasm -I$(COMMON)/runtime -I$(COMMON)/runtime/llasm $(SDL_CFLAGS) $(FT_CFLAGS) \
               $(EXTRA_CFLAGS)
 CFLAGS     := -arch arm64 -fpie -O2 -g
 LDFLAGS    := -arch arm64 -Wl,-pie
@@ -158,7 +161,7 @@ $(OBJ)/stubs.o: $(GEN)/stubs.c
 
 # 4. Link
 $(B)/$(GAME_NAME): $(OBJ)/game.stamp $(GLUE_OBJ) $(COM_OBJ) $(RUNTIME_OBJ) $(OBJ)/stubs.o $(OBJ)/com-stubs.o
-	$(CXX) $(LDFLAGS) -o $@ $(OBJ)/game/*.o $(GLUE_OBJ) $(COM_OBJ) $(RUNTIME_OBJ) $(OBJ)/stubs.o $(OBJ)/com-stubs.o $(SDL_LIBS) $(EXTRA_LIBS)
+	$(CXX) $(LDFLAGS) -o $@ $(OBJ)/game/*.o $(GLUE_OBJ) $(COM_OBJ) $(RUNTIME_OBJ) $(OBJ)/stubs.o $(OBJ)/com-stubs.o $(SDL_LIBS) $(FT_LIBS) $(EXTRA_LIBS)
 
 clean:
 	rm -rf $(GEN) $(OBJ) $(B)/$(GAME_NAME)

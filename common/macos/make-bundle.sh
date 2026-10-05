@@ -7,8 +7,9 @@
 # Uses from the game folder: game.conf (GAME_NAME, APP_NAME, APP_ICON_SOURCE,
 # GAME_DIR_DEFAULT) and macos/Info.plist.
 #
-# The bundle contains the arm64 program, the SDL2 (sdl2-compat) and SDL3
-# libraries from the conda env, and an icon made from the icon file in the
+# The bundle contains the arm64 program, the SDL2 (sdl2-compat), SDL3 and
+# FreeType (with libpng and zlib) libraries from the conda env, and an icon
+# made from the icon file in the
 # game folder (APP_ICON_SOURCE: .ico or .icns). The game data stays outside
 # the bundle. The bundle gets an ad-hoc signature (codesign -s -). No system
 # settings change.
@@ -41,6 +42,10 @@ cp "build/$GAME_NAME" "$APP/Contents/MacOS/$GAME_NAME"
 # sdl2-compat loads SDL3 from "@loader_path/libSDL3.dylib".
 cp "$CONDA_PREFIX/lib/libSDL2-2.0.0.dylib" "$APP/Contents/Frameworks/libSDL2-2.0.0.dylib"
 cp "$CONDA_PREFIX/lib/libSDL3.0.dylib" "$APP/Contents/Frameworks/libSDL3.dylib"
+# FreeType (GDI text) and the libraries it loads
+for lib in libfreetype.6.dylib libpng16.16.dylib libz.1.dylib; do
+    cp "$CONDA_PREFIX/lib/$lib" "$APP/Contents/Frameworks/$lib"
+done
 # Other conda libraries the program uses (EXTRA_DYLIBS in game.conf, names in $CONDA_PREFIX/lib)
 for lib in ${EXTRA_DYLIBS:-}; do
     cp "$CONDA_PREFIX/lib/$lib" "$APP/Contents/Frameworks/$lib"

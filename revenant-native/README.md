@@ -19,8 +19,10 @@ own frames:
 | Intro videos (Smacker, 640x240 interlaced, 44.1 kHz stereo sound) | Play. Escape skips them. |
 | Main menu, mouse, keyboard | Work. |
 | New game: the Keep, walking, talking (dialog choices) | Work. |
-| 3D characters (Direct3D 6 on the software rasterizer) | Drawn. |
-| Text (GDI fonts on surfaces: dialogs, messages, stats) | Drawn with the macOS fonts of the same name (Times New Roman, Arial). |
+| Speech (MP3 samples in `resources.rvr`) | Plays (decoded with macOS AudioToolbox). Not checked by ear. |
+| 3D characters (Direct3D 6 on the software rasterizer) | Drawn with smooth light, as with a 3D card (see "3D renderer" below). |
+| Text (GDI fonts on surfaces: dialogs, messages, stats) | Drawn with the macOS fonts of the same name (Times New Roman, Arial) and their hints, as on Windows. |
+| Mouse cursor | Only the game cursor shows (the Mac cursor is hidden). |
 | Load game | Works (a GOG save in Misthaven loads). |
 | Save game into a new slot | Works (typed name, `Save/Single/<name>` is written). |
 | Music (the GOG `Music/TrackNN.ogg` files as CD tracks) | Starts with the game. Not checked by ear. |
@@ -28,6 +30,16 @@ own frames:
 | Process | arm64 only (no Rosetta). |
 
 Not tested yet: combat, spells, later areas, and long play sessions.
+
+3D renderer: the GOG `revenant.ini` has `Software3D=Yes`. With it, the game
+draws the 3D figures with its own software renderer ("Blue"), not with
+Direct3D. Blue lights a figure in 32 steps from one light and a dark ambient
+light, so the sides that face away from the light are black. Wine gives the
+same picture: a Wine screenshot of the new-game scene matches this port's
+Blue picture (no pixel differs by more than 40 of 255). This port reads
+`Software3D` as `No` (`GAME_INI_OVERRIDES` in `runtime/game.h`), so the game
+draws the figures with Direct3D, on the port's renderer. The value in
+`revenant.ini` stays as it is.
 
 Known limits:
 
@@ -89,8 +101,17 @@ stops for another version). They are in `srw/`:
 - The MMX code (`0x43c...`) is not translated (139 traps). The game uses it
   only when CPUID reports MMX, and the runtime reports no MMX.
 - The game asks for DirectX 6: it gets IDirectDraw4 from DirectDraw 1 by
-  QueryInterface, and IDirect3D3 from IDirectDraw4. With `Software3D=Yes` in
-  `revenant.ini` it picks the Ramp or RGB software device.
+  QueryInterface, and IDirect3D3 from IDirectDraw4. With `Software3D=No`
+  (the port's value) it picks the hardware (HAL) device and draws with
+  DrawPrimitive. With `Software3D=Yes` it picks the RGB software device, but
+  draws with its own renderer and calls Direct3D only for lights and
+  materials.
+- The game gives a D3DVIEWPORT with `dvMinZ` = `dvMaxZ` = 0. Direct3D 6 and
+  Wine ignore these two values for a D3DVIEWPORT, so the depth range stays
+  0..1.
+- The speech is MP3 data in `resources.rvr`. The game plays it through
+  `AIL_set_named_sample_file` with the suffix `.mp3` (Miles decodes it with
+  `mp3dec.asi`).
 - The game reads `GetDeviceIdentifier` into a 1064-byte DirectX 6 structure
   on its stack (a larger write breaks its return address).
 - The game draws its interface text with GDI on surfaces with

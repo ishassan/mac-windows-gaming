@@ -1409,6 +1409,23 @@ uint32_t CCALL GetPrivateProfileStringA_c(const char *lpAppName, const char *lpK
         return 0;
     }
 
+#ifdef GAME_INI_OVERRIDES
+    // Port change: values that the port gives in place of the INI file (game.h)
+    if ((lpAppName != NULL) && (lpKeyName != NULL))
+    {
+        static const char *const overrides[][3] = { GAME_INI_OVERRIDES };
+        for (size_t i = 0; i < sizeof(overrides) / sizeof(overrides[0]); i++)
+        {
+            if (strcasecmp(lpAppName, overrides[i][0]) == 0 && strcasecmp(lpKeyName, overrides[i][1]) == 0)
+            {
+                strncpy(lpReturnedString, overrides[i][2], nSize - 1);
+                lpReturnedString[nSize - 1] = 0;
+                return (uint32_t)strlen(lpReturnedString);
+            }
+        }
+    }
+#endif
+
     file = NULL;
     if (lpFileName != NULL)
     {

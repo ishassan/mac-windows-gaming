@@ -36,7 +36,7 @@ All build tools come from one conda environment (`environment.yml`).
 Nothing is installed globally.
 
 ```sh
-conda env create -f environment.yml
+conda env create -f environment.yml   # an existing env: conda env update -f environment.yml
 . common/tools/env.sh
 common/tools/install-ldc.sh      # the D compiler for llasm (not on conda-forge)
 cd revenant-native               # or commandos-native
@@ -63,6 +63,9 @@ options of that game.
 - [M-HT/SR](https://github.com/M-HT/SR) (static recompiler) and the parts of
   the runtime that come from its Septerra Core port: Copyright (C) Roman Pauer,
   MIT license.
+- The app bundles contain the FreeType library (GDI text). Portions of this
+  software are copyright (C) The FreeType Project (www.freetype.org). All
+  rights reserved. FreeType License.
 - The other files in this repository: MIT license, Copyright (c) 2026 Islam
   Hassan (see [LICENSE](LICENSE)).
 - The games belong to their owners: Commandos (Pyro Studios), Revenant
