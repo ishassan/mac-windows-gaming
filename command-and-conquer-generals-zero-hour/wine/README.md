@@ -84,14 +84,14 @@ the settings in it), not a recorded command history.
    `Game Data` folders (the native app needs them too).
 3. Make the prefix:
    `WINEPREFIX="$HOME/Games/Command and Conquer Generals Zero Hour/Wine/wineprefix" wineboot -i`.
-4. Settings (with the same `WINEPREFIX`): `wine regedit /S generals/wine/prefix.reg`.
+4. Settings (with the same `WINEPREFIX`): `wine regedit /S command-and-conquer-generals-zero-hour/wine/prefix.reg`.
    It sets the two EA Games keys above, the Direct3D renderer `gl` and
    `LeftCommandIsCtrl`.
 5. Make the two Wine game folders under `<prefix>/drive_c/EA Games` and copy
    the Wine-only files above from the install into them.
 6. For the map editor: `winetricks mfc42` (with the same `WINEPREFIX`).
 7. Make the app:
-   `common/wine/make-app.sh generals/wine/app "$HOME/Games/Command and Conquer Generals Zero Hour/Wine" "<Zero Hour Wine game folder>/GeneralsZH.ico"`.
+   `common/wine/make-app.sh command-and-conquer-generals-zero-hour/wine/app "$HOME/Games/Command and Conquer Generals Zero Hour/Wine" "<Zero Hour Wine game folder>/GeneralsZH.ico"`.
 8. Start the app. It sets the My Documents link and adds the links to
    `Game Data` before it starts the game.
 

@@ -7,7 +7,8 @@ with a native layer. The ports use no Wine, no emulator and no Rosetta.
 Each game also has the setup of its original Windows version on Wine. We
 use it only as a reference, to compare with the native version.
 
-Each game has its own folder, with two subfolders:
+Each game has its own folder, named with the official game name in lowercase
+with hyphens (spaces break the build rules). It has two subfolders:
 
 - `native-mac/`: what makes the native Mac version work (for our ports: the
   build settings of the port).
@@ -27,9 +28,9 @@ the repository has a script that makes the change on your own copy.
 
 | Game | Native Mac | Wine (reference) | Native status |
 |------|------------|------------------|---------------|
-| Commandos: Behind Enemy Lines (1998) | [commandos/native-mac/](commandos/native-mac/) (our port) | [commandos/wine/](commandos/wine/) | Single-player works: videos, menus, missions, save and load. |
+| Commandos: Behind Enemy Lines (1998) | [commandos-behind-enemy-lines/native-mac/](commandos-behind-enemy-lines/native-mac/) (our port) | [commandos-behind-enemy-lines/wine/](commandos-behind-enemy-lines/wine/) | Single-player works: videos, menus, missions, save and load. |
 | Revenant (1999) | [revenant/native-mac/](revenant/native-mac/) (our port) | [revenant/wine/](revenant/wine/) | Single-player works: intro video, menus, new game, walking and talking, load and save, music. Not played to the end. |
-| Command & Conquer Generals Zero Hour (2003) | [generals/native-mac/](generals/native-mac/) (install notes for a community port, not ours) | [generals/wine/](generals/wine/) | Reaches the main menu (community port 1.0.2). |
+| Command & Conquer Generals Zero Hour (2003) | [command-and-conquer-generals-zero-hour/native-mac/](command-and-conquer-generals-zero-hour/native-mac/) (install notes for a community port, not ours) | [command-and-conquer-generals-zero-hour/wine/](command-and-conquer-generals-zero-hour/wine/) | Reaches the main menu (community port 1.0.2). |
 
 ## Layout
 
@@ -55,7 +56,7 @@ Nothing is installed globally.
 conda env create -f environment.yml   # an existing env: conda env update -f environment.yml
 . common/native-mac/tools/env.sh
 common/native-mac/tools/install-ldc.sh      # the D compiler for llasm (not on conda-forge)
-cd revenant/native-mac               # or commandos/native-mac
+cd revenant/native-mac               # or commandos-behind-enemy-lines/native-mac
 make tools                       # SRW and llasm, once for all games
 make                             # recompile the exe and build build/<Game>
 ../../common/native-mac/macos/make-bundle.sh   # build/<Game> (Native).app

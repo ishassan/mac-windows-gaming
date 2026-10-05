@@ -69,7 +69,7 @@ From the repository root (once): `conda env create -f environment.yml`,
 `. common/native-mac/tools/env.sh`, `common/native-mac/tools/install-ldc.sh`. Then:
 
 ```sh
-cd commandos/native-mac
+cd commandos-behind-enemy-lines/native-mac
 . ../../common/native-mac/tools/env.sh
 make tools                                   # once for all games
 make                                         # reads comandos.exe from the game folder
