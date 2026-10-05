@@ -67,7 +67,7 @@ becomes a trap, listed in `build/srw/srw-traps.txt`), and stages the output.
 | `WinApi-user32.c`, `input-script.c` | Window, messages from SDL input, cursor, keyboard state; scripted input for tests. |
 | `WinApi-gdi32.c`, `WinApi-gdi-text.c` | GDI objects; fonts and text on DirectDraw surfaces. CoreText finds the macOS font of the same name and gives the metrics. FreeType draws the glyphs with the font hints. Smooth (grayscale) edges only at the sizes where the font's "gasp" table asks for them, as in Wine; next to a color key, edge pixels mix with black. |
 | `WinApi-ddraw.c` | DirectDraw 1 to 4: surfaces, blits, color keys, palettes, display. |
-| `WinApi-d3d.c` | Direct3D 6 (IDirect3D3, IDirect3DDevice3) with a software rasterizer: transforms, lighting, textures, z-buffer, blending. The depth range is 0..1, as in Wine. |
+| `WinApi-d3d.c` | Direct3D 6 (IDirect3D3, IDirect3DDevice3) with a software rasterizer: transforms, lighting, textures, z-buffer, blending. The depth range is 0..1, and point lights use the Direct3D 6 attenuation rule, as in Wine. |
 | `WinApi-dinput.c` | DirectInput 5: system keyboard and mouse (no joysticks). |
 | `WinApi-dplay.c` | DirectPlay 4 objects without network (for games that make them at start-up). |
 | `WinApi-mss32.c`, `WinApi-mss32-redbook.c`, `audio-mixer.c`, `audio-decode.c` | Miles Sound System on a native mixer; MP3 samples in memory and CD audio from audio files (macOS AudioToolbox). |

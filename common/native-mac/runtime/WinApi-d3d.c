@@ -1146,12 +1146,19 @@ static void light_vertex(d3d_device *d, const float *pos_w, const float *nrm_w, 
             {
                 L[0] = l->pos[0] - pos_w[0]; L[1] = l->pos[1] - pos_w[1]; L[2] = l->pos[2] - pos_w[2];
                 float dist = sqrtf(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
-                if (l->range > 0 && dist > l->range) continue;
+                /* Direct3D 6 and older (D3DLIGHT2) use the distance as a part
+                 * of the range, 1 at the light and 0 at the range, and
+                 * multiply the light by att0 + att1 * d + att2 * d * d.
+                 * (Direct3D 7 divides by the same sum of the real distance.)
+                 * Wine does the same for these versions ("legacy lighting"
+                 * in dlls/wined3d/glsl_shader.c). Revenant's inventory light
+                 * has att 0.1 0.8 1.0: with the Direct3D 7 rule it is almost
+                 * zero, and the figure has no shading. */
                 if (l->type != 4)
                 {
-                    float den = l->att0 + l->att1 * dist + l->att2 * dist * dist;
-                    att = den > 0 ? 1.0f / den : 1.0f;
-                    if (att > 1.0f) att = 1.0f;
+                    if (l->range <= 0 || dist >= l->range) continue;
+                    float dn = (l->range - dist) / l->range;
+                    att = l->att0 + l->att1 * dn + l->att2 * dn * dn;
                 }
                 if (dist > 0) { L[0] /= dist; L[1] /= dist; L[2] /= dist; }
                 if (l->type == 2)   /* spot */
@@ -1710,7 +1717,7 @@ EXTERN_C uint32_t IDirect3DDevice3_SetTransform_c(d3d_device *d, uint32_t t, uin
     if (dst == NULL || m == NULL) return DDERR_INVALIDPARAMS;
     for (int i = 0; i < 16; i++) dst[i] = rdf(m + 4 * i);
     d->matrices_dirty = 1;
-    TRACE2("D3D: SetTransform %u: %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f\n", t,
+    TRACE2("D3D: SetTransform %u: %g %g %g %g / %g %g %g %g / %g %g %g %g / %g %g %g %g\n", t,
            dst[0], dst[1], dst[2], dst[3], dst[4], dst[5], dst[6], dst[7], dst[8], dst[9], dst[10], dst[11], dst[12], dst[13], dst[14], dst[15]);
     return D3D_OK;
 }
