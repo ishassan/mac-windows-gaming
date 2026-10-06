@@ -183,6 +183,17 @@ them again, in this order.
   settings and saves did not change (19 files, same checksums). Not tested:
   loading a save, and water inside a mission.
 
+- 2026-10-06, later: the installed build (`5f02335`) loaded the save "GLA 1",
+  saved once to a new file, and loaded that file again. River water inside
+  the mission moves. The 17 old save files did not change. Windows saves showed
+  broken names in the load list ("GA5" and boxes).
+
+- 2026-10-06: build of fork commit `a692659` (adds the save fix
+  `fix/load-retail-unicode-saves`) tested in a copy of the app, not installed.
+  The Windows saves show their real names, and the Windows save "GLA 5" loads
+  and plays. The Wine version loads the same save with the same state
+  ($6900).
+
 ## Known problems
 
 - Intro movie (1.0.2, tested 2026-10-03): in full screen the game goes

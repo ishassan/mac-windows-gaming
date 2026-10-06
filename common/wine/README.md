@@ -18,6 +18,27 @@ change those files on your Mac.
   Linux test VM ([../../linux-test-vm](../../linux-test-vm/README.md)). It runs
   the same Wine apps' scripts with Linux Wine 11.
 
+## Wine 11 (`patch-wow64cpu.py`)
+
+Wine 11.0 (Gcenx `wine-stable` 11.0_1, the app "Wine Stable") runs 32-bit
+games in WoW64 mode. Under Rosetta, 32-bit Direct3D games then crash at the
+start in most tries. Run the fix once after each install or update of Wine
+Stable:
+
+```
+common/wine/patch-wow64cpu.py
+```
+
+- Cause: the switch between 32-bit and 64-bit code in `wow64cpu.dll` is a
+  far jump. Under Rosetta, the CPU mode sometimes does not change on that
+  jump.
+- Fix: both jumps land on a small stub that checks the CPU mode and does the
+  switch again when it did not change. The script docstring has the detail.
+- The script keeps the original as `wow64cpu.dll.orig`. It works only on
+  the 11.0_1 build. With any other build it stops and changes nothing.
+- Tested 2026-10-06: without the fix, Revenant started in only 3 to 4 of 10
+  tries; with it, 20 of 20.
+
 ## Folder layout on the Mac
 
 ```
