@@ -65,6 +65,8 @@ settings in it), not a recorded command history.
    0.69 cores in place of 1.60 on Wine 8, and 0.85 in place of 1.53 on
    Wine 11, at the same 24.4 frames per second. Screenshots on Wine 11 with
    and without it differ no more than two runs with the same setting.
+   The real Wine app started with it on 2026-10-06 and reached the main
+   menu (0.21 cores in the menu); the saves did not change.
 5. Make `wineprefix_cx/drive_c/Revenant` and copy the Wine-only files above
    from the GOG install into it. Rename the GOG `_inmm.dll` to
    `_inmm_real.dll`.
@@ -121,6 +123,26 @@ CDSEW: 640x480x16
 
 Result: the 640x480 picture is in the top-left part of the screen, with
 black at the right and the bottom.
+
+Why the native app can fill the screen and Wine cannot (checked
+2026-10-06): the native app draws each 640x480 frame into its own buffer
+and lets the Mac scale that buffer to the window. Wine passes the game's
+mode change to the Mac, and the Mac has no 640x480 mode. Both Wine 8 and
+Wine 11 show the small picture.
+
+- Wine 11 has a setting that fakes the mode change and scales the picture:
+  `HKCU\Software\Wine\X11 Driver` `EmulateModeset=y` (the name says X11, but
+  Wine reads it for the Mac driver too). With it, the game gets 640x480 and
+  a 4:3 area fills the screen height, but the picture stays black. The Mac
+  driver of Wine 11 has no scaled drawing path for OpenGL; the X11 driver has
+  one (`offscreen` in `dlls/winex11.drv/opengl.c`). Wine 8 does not have
+  this setting.
+- cnc-ddraw does not work for Revenant (it stops with `DDERR_GENERIC`
+  at line 226, because cnc-ddraw has no Direct3D).
+- Ways that are left, none tried: a DirectDraw wrapper that scales and maps
+  the mouse (for example dgVoodoo2, a separate download); more code in our
+  `_inmm.dll` (fake the mode, stretch the picture, and map the mouse back);
+  or a change to the Mac driver of Wine.
 
 ### 2. Miles sound (`mss32.dll`)
 

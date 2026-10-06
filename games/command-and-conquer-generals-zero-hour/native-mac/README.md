@@ -202,18 +202,26 @@ them again, in this order.
 
 ## Camera in the main menu
 
-The 3D battle behind the main menu (the shell map) shows the units smaller
-than the Wine version: its camera is about 1.3 times higher. In a mission the
-two versions look almost the same (same save, 1024x768).
+The camera height in the menu is the same as in the Wine version. The
+menu only looks different because the two versions show different moments
+of the scripted battle at the same time after the start, and because the Wine
+version does not draw the menu frame.
 
-Probable cause (found 2026-10-06, not tested with a build): the shell map uses
-a scripted camera. Upstream (TheSuperHackers, pull request 2524) changed the
-height of the scripted camera and kept the retail height behind the switch
-`PRESERVE_RETAIL_SCRIPTED_CAMERA` in `Core/GameEngine/Include/Common/GameDefines.h`,
-which is `0`. With `0`, the camera offset is `MaxCameraHeight` (310 in
-`GameData.ini`). The retail game uses `CameraHeight` (232). 310 / 232 = 1.34,
-which matches the measured difference. Mission cut scenes also use the
-scripted camera.
+- Check of 2026-10-06 (1280x800 window, 24 frames each, 5 s apart): where
+  the same object is in both pictures (the junk boat on the beach), it has
+  about the same size in native and in Wine 8 (125 and 120 pixels wide in
+  the scaled pictures, measured by eye).
+- Tested and ruled out: a build with `PRESERVE_RETAIL_SCRIPTED_CAMERA` set
+  to `1` in `Core/GameEngine/Include/Common/GameDefines.h` (the retail
+  scripted camera of upstream pull request 2524). Also ruled out:
+  `MaxCameraHeight = 310` in place of 350 in `SagePatch.ini` (on a copy of
+  the settings). The menu did not change in either test. The change was not
+  kept.
+- An earlier note (also 2026-10-06) said that the menu camera is about 1.3
+  times higher. That came from pictures of different moments, and it is
+  wrong.
+- In a mission the two versions also look almost the same (same save,
+  1024x768).
 
 ## Known problems
 
