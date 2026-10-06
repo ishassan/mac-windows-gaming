@@ -24,13 +24,32 @@ use. The files are in the fork. The fork has the port's license (GPL 3 or
 later), not the MIT license of this repository.
 
 - Get the files: `git submodule update --init` (in the repository root).
-- Commit in use: tag `1.0.2` (`96cd64f`).
-- Plan for the branches in the fork:
-  - One branch for each general fix (for example the save text and the
-    water shaders). Each one can become a pull request to `fbraz3/GeneralsX`.
-  - One branch for our own changes (for example Cmd+Enter for full screen).
-    It stays in the fork, and we build the app from it.
-- The app that is installed now is still the downloaded 1.0.2 release.
+- Branches in the fork (all start from `fbraz3/GeneralsX` main after 1.0.2):
+  - One branch for each general fix. Each one can become a pull request to
+    `fbraz3/GeneralsX`.
+    - `fix/water-shader-assembler`: the water shaders (river, texbem water,
+      trapezoid water with sparkles). The port had no shader assembler on
+      macOS and Linux, so the water was drawn without these shaders.
+  - `custom`: our own changes, plus a merge of each fix branch. It stays in
+    the fork, and we build the app from it.
+    - Cmd+Enter or Option+Enter switches between full screen and a window.
+    - The app starts in a window (in full screen the game often skips the
+      intro movie). Start it with `-fullscreen` to start in full screen.
+- Build the app: `./make-app.sh` (in this folder). It builds the fork with
+  the conda env of the repository (`environment.yml`) and vcpkg (in the
+  ignored `build/vcpkg` of the repository root), then applies the local
+  changes below (steps 1 to 4). The result is
+  `build/Command & Conquer Generals Zero Hour.app`. It installs nothing.
+  The first build is slow, because vcpkg builds the libraries first.
+- The build uses the Homebrew `ffmpeg` and `libpng` of this Mac if they are
+  installed, as the official release does. The bundle step copies them into
+  the app, so the app itself does not need Homebrew.
+- The app that is installed now is the build of branch `custom` (2026-10-06).
+  The old downloaded 1.0.2 app is kept in `Old app backup (1.0.2 release,
+  2026-10-06)` in the game folder.
+- The build step also makes the app self-contained: it points MoltenVK at the
+  C++ library of macOS and removes the paths to build folders from every
+  file. Without this, the app loaded `libc++` from the conda env.
 
 ## Folder layout
 
@@ -156,6 +175,13 @@ them again, in this order.
   the game folder: native ARM64, reached the main menu, and loaded `.big` files
   from `Game Data`. Not tested yet: a new save written through the
   `Settings and Saves` link.
+
+- 2026-10-06: build of branch `custom` (fork commit `5f02335`) tested in a
+  window, and then installed. ARM64; every library loads from inside the app;
+  the main menu shows the online entry; the intro plays in the window;
+  water shows its sparkles; Cmd+Enter switches to full screen and back; the
+  settings and saves did not change (19 files, same checksums). Not tested:
+  loading a save, and water inside a mission.
 
 ## Known problems
 

@@ -15,3 +15,12 @@ dependencies:
   - sdl2=2.32        # window, input, audio for the runtime layer
   - freetype=2.13    # GDI text: glyphs with the font hints, as on Windows
   - python-unicorn=2.1  # x86 emulator: identify C runtime functions by running them
+  # Command & Conquer Generals Zero Hour (our fork of the GeneralsX port, CMake build)
+  - cmake=4.4
+  - ninja=1.13
+  - meson=1.12        # builds DXVK
+  - pkg-config
+  - glslang=16        # DXVK shader compiler (glslangValidator)
+  - libvulkan-loader
+  - libvulkan-headers
+  - moltenvk=1.4      # Vulkan on Metal
