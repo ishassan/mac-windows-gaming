@@ -107,3 +107,6 @@ icon was made in another way that was not recorded.
 | Mac, 2026-10-05 | The loading screen and the 3D battle behind the main menu show. Loading takes about 2 minutes. The menu buttons and a game were not tested. |
 | Linux test VM, 2026-10-05 | 3D shell map behind the main menu. |
 | `WorldBuilder.exe` in the Linux test VM, 2026-10-05 | Starts (MFC42 works). After EA's license dialog (accepted in the VM copy), the editor opens with the 3D terrain view and its tool windows. On the Mac the dialog still comes up once. |
+| Mac, speed, 2026-10-06 | Menu scene at 1280x800, CPU cores and median frames per second: native 0.46 cores (about 70 fps); Wine 8 2.22 cores, 21.8 fps; Wine 8 with `csmt=0` 1.18 cores, 22.6 fps; Wine 11 1.76 cores, 15.5 fps; Wine 11 with `csmt=0` 1.20 cores, 15.2 fps. Test copy of the prefix only; the real prefix keeps the default. |
+| Mac, Wine 11 (patched Wine Stable), 2026-10-06 | The ground draws white like snow, with `csmt` on and off. Keep Wine 8 for this game. |
+| Mac, saves, 2026-10-06 | The Windows save "GLA 5" loads ($6900); the native app with the save fix loads the same save with the same state. |

@@ -44,9 +44,10 @@ later), not the MIT license of this repository.
 - The build uses the Homebrew `ffmpeg` and `libpng` of this Mac if they are
   installed, as the official release does. The bundle step copies them into
   the app, so the app itself does not need Homebrew.
-- The app that is installed now is the build of branch `custom` (2026-10-06).
-  The old downloaded 1.0.2 app is kept in `Old app backup (1.0.2 release,
-  2026-10-06)` in the game folder.
+- The app that is installed now is the build of branch `custom`, fork commit
+  `a692659` (with the save fix), installed 2026-10-06. The build before it
+  (`5f02335`) is kept in `Old app backup (custom 5f02335, 2026-10-06)` in the
+  game folder. The downloaded 1.0.2 app went to the Trash on 2026-10-06.
 - The build step also makes the app self-contained: it points MoltenVK at the
   C++ library of macOS and removes the paths to build folders from every
   file. Without this, the app loaded `libc++` from the conda env.
@@ -193,6 +194,26 @@ them again, in this order.
   The Windows saves show their real names, and the Windows save "GLA 5" loads
   and plays. The Wine version loads the same save with the same state
   ($6900).
+
+- 2026-10-06: the same build installed. ARM64; 47 `.big` files open from
+  `Game Data`; the load list shows the real names of the Windows saves; the
+  save "GLA 1" made by the native app loads and plays. Settings and saves did
+  not change (20 files, same checksums).
+
+## Camera in the main menu
+
+The 3D battle behind the main menu (the shell map) shows the units smaller
+than the Wine version: its camera is about 1.3 times higher. In a mission the
+two versions look almost the same (same save, 1024x768).
+
+Probable cause (found 2026-10-06, not tested with a build): the shell map uses
+a scripted camera. Upstream (TheSuperHackers, pull request 2524) changed the
+height of the scripted camera and kept the retail height behind the switch
+`PRESERVE_RETAIL_SCRIPTED_CAMERA` in `Core/GameEngine/Include/Common/GameDefines.h`,
+which is `0`. With `0`, the camera offset is `MaxCameraHeight` (310 in
+`GameData.ini`). The retail game uses `CameraHeight` (232). 310 / 232 = 1.34,
+which matches the measured difference. Mission cut scenes also use the
+scripted camera.
 
 ## Known problems
 

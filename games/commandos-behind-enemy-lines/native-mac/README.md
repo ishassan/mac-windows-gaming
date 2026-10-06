@@ -25,6 +25,7 @@ Single-player works. These items were tested with scripted input
 | End of mission 1, (N)ext mission | Works: the mission 2 briefing and map load. |
 | In-game menu (Escape), Save Game into a slot | Works. The file `SAVE0000.SAV` is written. |
 | Quick save (Ctrl+S) and quick load (Ctrl+L) | Work. `QLOAD.SAV` is written and read back. |
+| Saves between the native app and the Wine version (2026-10-06) | Work both ways. A native quick save of the river mission (save slot 3) loaded in Wine 8 after mission 1, and a Wine 8 quick save of mission 1 loaded in the native app after the river mission. |
 | Music (WAV streams) and sound effects (Miles samples) | Reach the mixer. Not checked by ear. |
 | Stress test (3 minutes of random input) | No crash. |
 | Exit from the menu | Clean (exit code 0). |

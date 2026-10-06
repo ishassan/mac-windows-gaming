@@ -60,7 +60,11 @@ settings in it), not a recorded command history.
    `WINEPREFIX="$HOME/Games/Revenant/Wine/wineprefix_cx" wineboot -i`.
 4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/revenant/wine/prefix.reg`.
    It sets `ddraw=builtin` (the Wine DirectDraw, not a replacement
-   `ddraw.dll`) and the Mac driver value `ForceOpenGLBackingStore=y`.
+   `ddraw.dll`), the Mac driver value `ForceOpenGLBackingStore=y`, and
+   Direct3D `csmt=0` (since 2026-10-06). With `csmt=0`, Revenant used
+   0.69 cores in place of 1.60 on Wine 8, and 0.85 in place of 1.53 on
+   Wine 11, at the same 24.4 frames per second. Screenshots on Wine 11 with
+   and without it differ no more than two runs with the same setting.
 5. Make `wineprefix_cx/drive_c/Revenant` and copy the Wine-only files above
    from the GOG install into it. Rename the GOG `_inmm.dll` to
    `_inmm_real.dll`.

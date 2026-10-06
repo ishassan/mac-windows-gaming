@@ -8,3 +8,9 @@ REGEDIT4
 
 [HKEY_CURRENT_USER\Software\Wine\Mac Driver]
 "ForceOpenGLBackingStore"="y"
+
+; Direct3D work on the game thread (no command-stream thread). Revenant on
+; Wine 8 and Wine 11 then uses about half the CPU at the same frame rate, and
+; the picture does not change (picture test on Wine 11, 2026-10-06).
+[HKEY_CURRENT_USER\Software\Wine\Direct3D]
+"csmt"=dword:00000000
