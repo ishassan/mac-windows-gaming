@@ -20,17 +20,36 @@ WSOCK = {1: "accept", 2: "bind", 3: "closesocket", 4: "connect", 6: "getsockname
          12: "ioctlsocket", 13: "listen", 14: "ntohl", 15: "ntohs", 16: "recv",
          17: "recvfrom", 18: "select", 19: "send", 20: "sendto", 21: "setsockopt",
          22: "shutdown", 23: "socket", 52: "gethostbyname", 57: "gethostname",
-         111: "WSAGetLastError", 115: "WSAStartup", 116: "WSACleanup"}
+         111: "WSAGetLastError", 115: "WSAStartup", 116: "WSACleanup", 151: "__WSAFDIsSet"}
+# OLEAUT32 ordinals (the same names as in SRW_loader.c)
+OLEAUT = {2: "SysAllocString", 6: "SysFreeString", 9: "VariantClear", 32: "CreateStdDispatch",
+          161: "LoadTypeLib", 200: "GetErrorInfo"}
 # Names SRW gives to these ordinals (see SRW_loader.c): most get "ws2_32.".
 WSOCK_PLAIN = {"getsockopt", "recv", "recvfrom", "setsockopt"}
 
 
+# C++ names of MSVCRT and MSVCIRT imports: the runtime procedure names
+CXX_NAMES = {
+    "??0exception@@QAE@XZ": "exception_ctor",
+    "??0exception@@QAE@ABV0@@Z": "exception_copy_ctor",
+    "??1exception@@UAE@XZ": "exception_dtor",
+    "??1type_info@@UAE@XZ": "type_info_dtor",
+    "?terminate@@YAXXZ": "cxx_terminate",
+    "?_set_se_translator@@YAP6AXIPAU_EXCEPTION_POINTERS@@@ZP6AXI0@Z@Z": "cxx_set_se_translator",
+}
+
+
 def srw_and_clean(dll, imp):
+    if imp.import_by_ordinal and dll.upper() == "OLEAUT32.DLL":
+        name = OLEAUT[imp.ordinal]
+        return name, name
     if imp.import_by_ordinal:
         name = WSOCK[imp.ordinal]
         srw = name if name in WSOCK_PLAIN else "ws2_32." + name
         return srw, "ws_" + name
     name = imp.name.decode()
+    if name in CXX_NAMES:
+        return name, CXX_NAMES[name]
     m = re.match(r"_(\w+)@\d+$", name)
     if m:                       # mss32 stdcall decoration: _AIL_startup@0
         return name, m.group(1)

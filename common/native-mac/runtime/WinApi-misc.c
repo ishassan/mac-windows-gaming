@@ -13,6 +13,8 @@
 #include <strings.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <string>
+#include <vector>
 #include "WinApi.h"
 #include "Game-Memory.h"
 #include "CLIB.h"
@@ -48,43 +50,98 @@ EXTERN_C uint32_t GetDeviceCaps_c(void *hdc, int32_t index)
 EXTERN_C uint32_t GetPixel_c(void *hdc, int32_t x, int32_t y) { return 0; }
 EXTERN_C uint32_t SetPixel_c(void *hdc, int32_t x, int32_t y, uint32_t color) { return color; }
 
-/* -------------------------------------------------------------- ADVAPI32 */
-/* No registry keys exist: each game uses its defaults. */
-
-EXTERN_C uint32_t RegOpenKeyExA_c(uint32_t hKey, const char *lpSubKey, uint32_t ulOptions, uint32_t samDesired, void *phkResult)
-{
-    if (phkResult) wr32(phkResult, 0);
-    return ERROR_FILE_NOT_FOUND;
-}
-
-EXTERN_C uint32_t RegCloseKey_c(uint32_t hKey) { return 0; }
-
-EXTERN_C uint32_t RegEnumValueA_c(uint32_t hKey, uint32_t dwIndex, char *name, void *namelen, void *res, void *type, void *data, void *datalen)
-{
-    return 259;   /* ERROR_NO_MORE_ITEMS */
-}
-
-EXTERN_C uint32_t RegQueryInfoKeyA_c(uint32_t hKey, char *a, void *b, void *c, void *subkeys, void *e, void *f,
-                                     void *values, void *h, void *i, void *j, void *k)
-{
-    if (subkeys) wr32(subkeys, 0);
-    if (values) wr32(values, 0);
-    return ERROR_FILE_NOT_FOUND;
-}
+/* ADVAPI32 (registry): see WinApi-registry.c */
 
 /* --------------------------------------------------------------- SHELL32 */
-/* "My Documents" is a folder inside the game folder (drive C:). */
+/* "My Documents" is a folder inside the game folder (drive C:):
+ * GAME_DOCUMENTS_PATH in the game's game.h (default "C:\\User"). The
+ * environment variable <P>DOCUMENTS=<host folder> gives another folder (for
+ * tests on a copy of the saves); it becomes a path relative to drive C:. */
 
-#define DOCUMENTS_PATH "C:\\User"
+#ifndef GAME_DOCUMENTS_PATH
+#define GAME_DOCUMENTS_PATH "C:\\User"
+#endif
+
+static void documents_path(char *out)
+{
+    const char *env = game_getenv("DOCUMENTS");
+    char cwd[4096];
+    if (env != NULL && env[0] == '/' && getcwd(cwd, sizeof(cwd)) != NULL)
+    {
+        /* relative path from the game folder to env */
+        std::string a(cwd), b(env);
+        while (b.size() > 1 && b.back() == '/') b.pop_back();
+        std::vector<std::string> pa, pb;
+        auto split = [](const std::string &s, std::vector<std::string> &v) {
+            size_t i = 0;
+            while (i < s.size())
+            {
+                size_t j = s.find('/', i);
+                if (j == std::string::npos) j = s.size();
+                if (j > i) v.push_back(s.substr(i, j - i));
+                i = j + 1;
+            }
+        };
+        split(a, pa);
+        split(b, pb);
+        size_t k = 0;
+        while (k < pa.size() && k < pb.size() && pa[k] == pb[k]) k++;
+        std::string r = "C:";
+        for (size_t i = k; i < pa.size(); i++) r += "\\..";
+        for (size_t i = k; i < pb.size(); i++) r += "\\" + pb[i];
+        if (r == "C:") r = "C:\\";
+        strcpy(out, r.c_str());
+        return;
+    }
+    strcpy(out, GAME_DOCUMENTS_PATH);
+}
+
+/* The host folder of the documents (saves and settings), for runtime parts
+   that write files there (the DXVK shader cache). Empty if not found. */
+EXTERN_C void Winapi_DocumentsHostPath(char *out, size_t size)
+{
+    char guest[4096], host[4096];
+    documents_path(guest);
+    out[0] = 0;
+    CLIB_FindFile(guest, host);
+    if (realpath(host, guest) != NULL) snprintf(out, size, "%s", guest);
+}
+
+static int make_dirs(const char *winpath);
 
 EXTERN_C uint32_t SHGetFolderPathA_c(void *hwnd, uint32_t csidl, void *hToken, uint32_t dwFlags, char *pszPath)
 {
-    strcpy(pszPath, DOCUMENTS_PATH);
+    documents_path(pszPath);
     if (csidl & 0x8000)   /* CSIDL_FLAG_CREATE */
     {
-        mkdir("User", 0755);
+        make_dirs(pszPath);
     }
     return 0;   /* S_OK */
+}
+
+/* CSIDL_PERSONAL (5) and the other folders: all are "My Documents" */
+EXTERN_C uint32_t SHGetSpecialFolderPathA_c(void *hwnd, char *pszPath, uint32_t csidl, uint32_t fCreate)
+{
+    documents_path(pszPath);
+    if (fCreate) make_dirs(pszPath);
+    return 1;
+}
+
+/* An item ID list: here a guest block that holds the folder id */
+EXTERN_C uint32_t SHGetSpecialFolderLocation_c(void *hwnd, uint32_t nFolder, void *ppidl)
+{
+    uint8_t *pidl = (uint8_t *)x86_calloc(1, 8);
+    wr32(pidl, 0x4c444950);   /* "PIDL" */
+    wr32(pidl + 4, nFolder);
+    wr32(ppidl, to_guest(pidl));
+    return 0;
+}
+
+EXTERN_C uint32_t SHGetPathFromIDListA_c(void *pidl, char *pszPath)
+{
+    if (pidl == NULL || rd32(pidl) != 0x4c444950) return 0;
+    documents_path(pszPath);
+    return 1;
 }
 
 static int make_dirs(const char *winpath)
@@ -164,7 +221,24 @@ EXTERN_C uint32_t CoCreateInstance_c(void *rclsid, void *pUnkOuter, uint32_t dwC
 
 #define WSAENETDOWN 10050
 
-EXTERN_C uint32_t ws_WSAStartup_c(uint32_t wVersionRequested, void *lpWSAData) { return WSAENETDOWN; }
+/* Port change: the network is off, so WSAStartup fails. A game whose
+   game.h defines GAME_WSA_STARTUP_OK gets success (Generals Zero Hour asks
+   for the host name through it, for the player name in skirmish); its
+   sockets still fail. */
+EXTERN_C uint32_t ws_WSAStartup_c(uint32_t wVersionRequested, void *lpWSAData)
+{
+#ifdef GAME_WSA_STARTUP_OK
+    if (lpWSAData)
+    {
+        memset(lpWSAData, 0, 400);                  /* WSADATA (32-bit) */
+        wr16(lpWSAData, 0x0202);                    /* wVersion */
+        wr16((uint8_t *)lpWSAData + 2, 0x0202);     /* wHighVersion */
+    }
+    return 0;
+#else
+    return WSAENETDOWN;
+#endif
+}
 EXTERN_C uint32_t ws_WSACleanup_c(void) { return 0; }
 EXTERN_C uint32_t ws_socket_c(uint32_t af, uint32_t type, uint32_t protocol) { return 0xffffffff; }
 EXTERN_C uint32_t ws_closesocket_c(uint32_t s) { return 0; }
@@ -180,7 +254,8 @@ EXTERN_C uint32_t ws_ioctlsocket_c(uint32_t s, uint32_t cmd, void *argp) { retur
 EXTERN_C void *ws_gethostbyname_c(const char *name) { return NULL; }
 EXTERN_C uint32_t ws_gethostname_c(char *name, uint32_t namelen)
 {
-    if (name && namelen > 0) snprintf(name, namelen, "localhost");
+    /* the game shows it as the player name (Windows: the computer name) */
+    if (name && namelen > 0) snprintf(name, namelen, "Player");
     return 0;
 }
 EXTERN_C uint32_t ws_htons_c(uint32_t v) { return ((v & 0xff) << 8) | ((v >> 8) & 0xff); }

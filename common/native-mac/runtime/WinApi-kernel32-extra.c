@@ -204,15 +204,24 @@ EXTERN_C uint32_t GetVersion_c(void)
 
 /* GlobalAlloc: GMEM_FIXED memory is a pointer; GMEM_MOVEABLE is used the same
  * way (GlobalLock is not imported by the games that need this). */
+static int trace_mem(void)
+{
+    static int t = -1;
+    if (t < 0) t = game_getenv("TRACE_MEM") != NULL;
+    return t;
+}
+
 EXTERN_C void *GlobalAlloc_c(uint32_t uFlags, uint32_t dwBytes)
 {
     void *p = x86_malloc(dwBytes ? dwBytes : 1);
     if (p && (uFlags & 0x40)) memset(p, 0, dwBytes);   /* GMEM_ZEROINIT */
+    if (trace_mem()) fprintf(stderr, "GlobalAlloc(0x%x, %u) -> 0x%x (caller %s)\n", uFlags, dwBytes, to_guest(p), guest_caller());
     return p;
 }
 
 EXTERN_C void *GlobalFree_c(void *hMem)
 {
+    if (trace_mem()) fprintf(stderr, "GlobalFree(0x%x) (caller %s)\n", to_guest(hMem), guest_caller());
     if (hMem) x86_free(hMem);
     return NULL;
 }

@@ -61,3 +61,35 @@ endm
 macro REPNE_CMPSD
     call x86_repne_cmpsd $
 endm
+
+; x87 instructions that the SR support files do not have (cpu-extra.c)
+funcv x87_fsincos_void $
+funcv x87_fldl2e_void $
+funcv x87_fcomip_st $, num
+funcv x87_fucomip_st $, num
+funcv x86_cpuid $
+funcv x86_rdtsc $
+
+macro FSINCOS_VOID
+    call x87_fsincos_void $
+endm
+
+macro FLDL2E_VOID
+    call x87_fldl2e_void $
+endm
+
+; ffree st(i): the register is only tagged empty, the stack top does not
+; change. There are no tags here, so it does nothing.
+macro FFREE_ST num
+endm
+
+macro FCOMIP_ST num
+    call x87_fcomip_st $, \num
+endm
+
+macro FUCOMIP_ST num
+    call x87_fucomip_st $, \num
+endm
+
+; "lock bts dword [addr], 0": returns the old bit 0 in tmp0 (atomic)
+func x86_lock_bts0 *addr

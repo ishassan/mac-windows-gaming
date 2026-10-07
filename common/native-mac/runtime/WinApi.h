@@ -51,6 +51,9 @@ WINAPI_STORAGE __declspec(thread) unsigned int Winapi_LastError;
 
 #ifndef WINAPI_NODEF_DEFINITIONS
 #define ERROR_FILE_NOT_FOUND 2
+#ifndef ERROR_PATH_NOT_FOUND
+#define ERROR_PATH_NOT_FOUND 3
+#endif
 #define ERROR_ACCESS_DENIED 5
 #define ERROR_INVALID_HANDLE 6
 #define ERROR_NEGATIVE_SEEK 131

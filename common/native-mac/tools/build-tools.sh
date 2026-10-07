@@ -11,8 +11,11 @@ ROOT="$(cd "$COMMON/../.." && pwd)"
 mkdir -p "$ROOT/build/bin"
 SR="$ROOT/build/vendor/SR"
 
-# llasm (D language)
-( cd "$SR/llasm" && "$LDC2" --O2 llasm.d --of="$ROOT/build/bin/llasm" )
+# llasm (D language), with the local changes in patches/llasm.patch
+( cd "$SR/llasm"
+  git checkout -q -- .
+  if [ -s "$COMMON/tools/patches/llasm.patch" ]; then git -C .. apply "$COMMON/tools/patches/llasm.patch"; fi
+  "$LDC2" --O2 llasm.d --of="$ROOT/build/bin/llasm" )
 
 # SRW with llasm output
 ( cd "$SR/SRW"

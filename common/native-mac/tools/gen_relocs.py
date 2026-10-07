@@ -33,6 +33,13 @@ import capstone
 import pefile
 from capstone import x86_const as X
 
+# Imports that never return (the same list as SR_is_noret_import in SRW):
+# the bytes after a call to one of them can be padding or data.
+NORET_IMPORTS = {
+    "_CxxThrowException", "exit", "_exit", "abort", "longjmp", "_amsg_exit",
+    "ExitProcess", "ExitThread", "_endthread", "_endthreadex",
+    "FatalAppExitA", "FatalExit",
+}
 PRINTABLE = set(range(0x20, 0x7F)) | {0x09, 0x0A, 0x0D}
 PADDING = (0xCC, 0x90)
 REL_BRANCH_OPCODES = {0xE8, 0xE9, 0xEB} | set(range(0x70, 0x80))
@@ -55,9 +62,20 @@ class Image:
         self.entry = self.base + self.pe.OPTIONAL_HEADER.AddressOfEntryPoint
         self.find_ilt()
         self.iat = set()
+        self.iat_names = {}
         for imp in getattr(self.pe, "DIRECTORY_ENTRY_IMPORT", []):
             for f in imp.imports:
                 self.iat.add(f.address)
+                if f.name:
+                    self.iat_names[f.address] = f.name.decode()
+
+    def noret_import_call(self, va):
+        """True if the 6 bytes at va are "call/jmp dword ptr [IAT]" of an
+        import that never returns."""
+        b = self.bytes_at(va, 6)
+        if b[0] != 0xFF or b[1] not in (0x15, 0x25):
+            return False
+        return self.iat_names.get(struct.unpack_from("<I", b, 2)[0]) in NORET_IMPORTS
 
     def section_of(self, va):
         for s in self.sections:
@@ -126,9 +144,30 @@ class Image:
         lo, hi = self.ilt
         return lo <= va < hi and (va - lo) % 5 == 0
 
-    def looks_like_function_start(self, va):
+    def looks_like_function_start(self, va, insns=None, owner=None, noret=()):
         if not self.in_text(va):
             return False
+        if insns is not None and owner is not None:
+            prev = owner.get(va - 1)
+            if prev == -1 and owner.get(va) is None:
+                # after a jump table: switch tables follow the function's code
+                b = self.bytes_at(va, 3)
+                if b[0] not in PADDING and b != b"\x00\x00\x00":
+                    return True
+            if prev not in (None, -1) and prev in insns:
+                i = insns[prev]
+                ends_flow = i.mnemonic in ("ret", "jmp") or i.mnemonic.startswith("ret")
+                if i.mnemonic == "call":
+                    # after a call that never returns ("throw" at the end of a function)
+                    op = i.operands[0] if i.operands else None
+                    if op is not None and op.type == X.X86_OP_IMM and (op.imm & 0xFFFFFFFF) in noret:
+                        ends_flow = True
+                    elif self.noret_import_call(i.address):
+                        ends_flow = True
+                if i.address + i.size == va and ends_flow:
+                    b = self.bytes_at(va, 3)
+                    if b[0] not in PADDING and b != b"\x00\x00\x00":
+                        return True
         if self.is_ilt_thunk(va):
             return True
         prev = self.byte(va - 1) if va > self.text[1] else 0xCC
@@ -208,28 +247,124 @@ def load_not_relocs(path=NOT_RELOCS_FILE):
 
 NOT_RELOCS = load_not_relocs()
 
+# Strict rule for code pointers in data (--strict-data-code, for big exes
+# such as Generals): a dword in data that points into .text adds new code
+# only if its target looks like a function start. In a big .text, many
+# plain numbers (two 16-bit values such as 0x00450008) are also in the .text
+# range, and runs of them made code at false addresses.
+STRICT_DATA_CODE = False
+
+
 
 def analyze(img, extra_code=(), log=print):
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
     md.detail = True
     data_regions = dict(DATA_IN_TEXT)    # va -> length, bytes inside .text that are data
+    rejected = set()                     # guessed code starts that made overlaps
     restarts = 0
     while True:
-        st = _analyze_once(img, md, extra_code, data_regions)
+        st = _analyze_once(img, md, extra_code, data_regions, rejected)
         conflicts = st["conflicts"]
-        if not conflicts:
+        bad = guessed_roots_in_overlaps(st, img, md) if STRICT_DATA_CODE else set()
+        bad -= rejected
+        if not conflicts and not bad:
             st["restarts"] = restarts
+            st["rejected"] = rejected
             return st
+        for va, ca, cb in st.get("overlap_log", ()):
+            log("  overlap 0x%x: decode from %s, bytes owned by %s" % (va, ca, cb))
         restarts += 1
-        before = len(data_regions)
+        before = (len(data_regions), len(rejected))
         data_regions.update(conflicts)
-        log("restart %d: %d jump tables overlapped code" % (restarts, len(conflicts)))
-        if len(data_regions) == before or restarts > 20:
+        rejected |= bad
+        log("restart %d: %d jump tables overlapped code, %d guessed code starts rejected"
+            % (restarts, len(conflicts), len(bad)))
+        if (len(data_regions), len(rejected)) == before or restarts > 20:
             st["restarts"] = restarts
+            st["rejected"] = rejected
             return st
 
 
-def _analyze_once(img, md, extra_code, data_regions):
+def skips_over(img, md, lo, hi):
+    """True if a straight decode from lo passes hi inside an instruction."""
+    va = lo
+    while va < hi:
+        try:
+            insn = next(md.disasm(img.bytes_at(va, 16), va, 1))
+        except StopIteration:
+            return False
+        va += insn.size
+    return va != hi
+
+
+def guessed_roots_in_overlaps(st, img, md):
+    """The guessed code starts that made overlaps, to reject on the next pass.
+
+    A guessed start is a data pointer or a code address used as an
+    immediate value (not a call or jump target). At an overlap, two decodes
+    disagree: the one that ran into the bytes and the one that owns them.
+    Each has a root (the start of its decode). Only guessed roots can be
+    wrong here. Sure cases first: one guessed root, or two where one is
+    inside an instruction of the other. Only when no overlap has a sure
+    case: the guessed root with fewer references, else both."""
+    src = st["root_src"]
+    insroot = st["insroot"]
+    owner = st["owner"]
+    refs = collections.Counter(st["relocs"].values())
+
+    def guessed(r):
+        return r is not None and src.get(r, ("root", None))[0] in ("data", "imm")
+
+    def chain(r):
+        out = []
+        seen = set()
+        while r is not None and r not in seen:
+            seen.add(r)
+            kind, parent = src.get(r, ("root", None))
+            if kind in ("data", "imm"):
+                out.append(r)
+            r = parent
+        return out
+
+    sure, unsure = set(), []
+    for va, root in st["overlap_src"]:
+        o = owner.get(va)
+        other = insroot.get(o) if o not in (None, -1) else None
+        st.setdefault("overlap_log", []).append(
+            (va, [hex(x) for x in chain(root)], [hex(x) for x in chain(other)] if other else []))
+        cand = [r for r in (root, other) if guessed(r)]
+        if va == root and guessed(root):
+            # The guessed start itself is inside an instruction of a decode
+            # that came first.
+            sure.add(root)
+        elif len(cand) == 1:
+            sure.add(cand[0])
+        elif len(cand) == 2 and cand[0] != cand[1]:
+            lo, hi = sorted(cand)
+            if hi - lo < 256 and skips_over(img, md, lo, hi):
+                sure.add(hi)
+            else:
+                unsure.append(cand)
+        elif len(cand) == 2:
+            sure.add(cand[0])
+        else:
+            # Both roots are call or jump targets: the wrong guess is
+            # further up one of the chains.
+            a = chain(root)
+            b = chain(other) if other is not None else []
+            unsure.append([x[0] for x in (a, b) if x])
+    if sure:
+        return sure
+    bad = set()
+    for cand in unsure:
+        if len(cand) == 2 and refs[cand[0]] != refs[cand[1]]:
+            bad.add(min(cand, key=lambda r: refs[r]))
+        else:
+            bad.update(cand)
+    return bad
+
+
+def _analyze_once(img, md, extra_code, data_regions, rejected=frozenset()):
     insns = {}
     owner = {}
     data_bytes = set()
@@ -245,18 +380,26 @@ def _analyze_once(img, md, extra_code, data_regions):
     code_starts = set(roots)
     code_labels = set()      # targets referenced from code operands
     overlaps = []
+    overlap_src = []         # (address, root of the decode that ran into it)
+    noret_thunks = set()     # "jmp [IAT]" thunks of imports that never return
+    root_src = {}            # root -> (kind, parent root)
+    insroot = {}             # instruction -> root of its decode
+    cur = [None]             # the root that decode_block decodes now
 
     def add_reloc(fix, tgt, kind):
         if fix not in relocs:
             relocs[fix] = tgt
             kinds[fix] = kind
 
-    def add_root(va):
+    def add_root(va, kind="code"):
+        if va in rejected:
+            return
         if img.in_text(va) and va not in code_starts and va not in data_bytes:
+            root_src[va] = (kind, cur[0])
             code_starts.add(va)
             roots.append(va)
 
-    def handle_operands(insn):
+    def handle_operands(insn, prev=None):
         for op in insn.operands:
             if op.type == X.X86_OP_IMM and insn.imm_size == 4 and insn.imm_offset:
                 if is_rel_branch(insn):
@@ -265,7 +408,25 @@ def _analyze_once(img, md, extra_code, data_regions):
                 if not img.in_image(v):
                     continue
                 fix = insn.address + insn.imm_offset
-                if (insn.mnemonic in ("test", "or", "xor")
+                if v in rejected:
+                    doubtful.append((fix, v, "rejected code start in '%s %s', not a relocation" % (insn.mnemonic, insn.op_str)))
+                    continue
+                data_addr = False
+                if STRICT_DATA_CODE and not img.in_text(v) and img.section_of(v) and (v & 0xFFFF) != 0:
+                    # "xor reg, <data address>" (a check that a pointer is in a
+                    # static array) and "sbb reg, reg; and reg, <data address>"
+                    # (x ? &data : 0) use the address as a value.
+                    if insn.mnemonic == "xor":
+                        data_addr = True
+                    elif (insn.mnemonic == "and" and prev is not None and prev.mnemonic == "sbb"
+                          and len(prev.operands) == 2 and prev.operands[0].type == X.X86_OP_REG
+                          and insn.operands[0].type == X.X86_OP_REG
+                          and prev.operands[0].reg == prev.operands[1].reg == insn.operands[0].reg):
+                        data_addr = True
+                    elif (insn.mnemonic == "and" and prev is not None and prev.mnemonic == "pop"):
+                        # "sbb eax, eax; pop esi; and eax, <data address>"
+                        data_addr = True
+                if not data_addr and (insn.mnemonic in ("test", "or", "xor")
                         or (insn.mnemonic == "and" and not img.in_text(v))):
                     # Bit masks, not addresses. "and reg, <code address>" stays a
                     # relocation: MSVC writes "x ? &func : 0" as neg/sbb/and.
@@ -274,11 +435,17 @@ def _analyze_once(img, md, extra_code, data_regions):
                 add_reloc(fix, v, "imm:" + insn.mnemonic)
                 code_labels.add(v)
                 if img.in_text(v):
-                    add_root(v)
+                    add_root(v, "imm")
                 if v & 0xFFFF == 0:
                     doubtful.append((fix, v, "round immediate in '%s %s'" % (insn.mnemonic, insn.op_str)))
             elif op.type == X.X86_OP_MEM and insn.disp_size == 4 and insn.disp_offset:
                 v = op.mem.disp & 0xFFFFFFFF
+                if (STRICT_DATA_CODE and img.in_image(v) and insn.mnemonic == "lea" and op.mem.base != 0
+                        and op.mem.index != 0 and img.in_text(v)):
+                    # "lea ecx, [ecx + edx + 0x800080]": arithmetic with a
+                    # constant (the rounding of a pixel average), not an address
+                    doubtful.append((insn.address + insn.disp_offset, v, "constant in '%s %s'" % (insn.mnemonic, insn.op_str)))
+                    continue
                 if img.in_image(v):
                     add_reloc(insn.address + insn.disp_offset, v, "disp:" + insn.mnemonic)
                     code_labels.add(v)
@@ -399,6 +566,7 @@ def _analyze_once(img, md, extra_code, data_regions):
             add_root(t)
 
     def decode_block(start):
+        cur[0] = start
         work = [start]
         while work:
             va = work.pop()
@@ -409,20 +577,28 @@ def _analyze_once(img, md, extra_code, data_regions):
                 if va in owner or va in data_bytes:
                     if owner.get(va) != -1:
                         overlaps.append(va)
+                        overlap_src.append((va, start))
+                    elif STRICT_DATA_CODE:
+                        # code that runs into a jump table: wrong if its
+                        # start was a guess
+                        overlap_src.append((va, start))
                     break
                 try:
                     insn = next(md.disasm(img.bytes_at(va, 16), va, 1))
                 except StopIteration:
                     overlaps.append(va)
+                    overlap_src.append((va, start))
                     break
                 if any(b in data_bytes for b in range(va, va + insn.size)):
                     overlaps.append(va)
+                    overlap_src.append((va, start))
                     break
                 insns[va] = insn
+                insroot[va] = start
                 history.append(insn)
                 for b in range(va, va + insn.size):
                     owner[b] = va
-                handle_operands(insn)
+                handle_operands(insn, history[-2] if len(history) > 1 else None)
                 g = insn.groups
                 mnem = insn.mnemonic
                 if X.X86_GRP_RET in g or mnem in ("hlt", "int3", "ud2"):
@@ -439,7 +615,13 @@ def _analyze_once(img, md, extra_code, data_regions):
                 elif X.X86_GRP_CALL in g:
                     op = insn.operands[0] if insn.operands else None
                     if op is not None and op.type == X.X86_OP_IMM:
-                        add_root(op.imm & 0xFFFFFFFF)
+                        t = op.imm & 0xFFFFFFFF
+                        add_root(t)
+                        if img.in_text(t) and img.noret_import_call(t):
+                            noret_thunks.add(t)
+                            break
+                    elif img.noret_import_call(insn.address):
+                        break
                 va += insn.size
 
     def scan_data():
@@ -468,13 +650,32 @@ def _analyze_once(img, md, extra_code, data_regions):
                             and img.section_of(v)[0] != ".rsrc"
                             if img.section_of(v) else False):
                         stringy = img.looks_like_string(a)
-                        if not stringy or v in code_labels or img.pointer_not_string(a):
+                        if STRICT_DATA_CODE and v % 2 and v not in code_labels:
+                            # pairs of 16-bit numbers (0x00940093) and GUID bytes:
+                            # data pointers to odd addresses are rare
+                            doubtful.append((a, v, "odd data pointer, not used (" + name + ")"))
+                        elif not stringy or v in code_labels or img.pointer_not_string(a):
                             add_reloc(a, v, "data:" + name)
                         else:
                             doubtful.append((a, v, "string-like data dword, not used (" + name + ")"))
                 a += 4
             added |= flush_run(run)
         return added
+
+    code_ref_cache = [-1, set()]
+
+    def code_referenced(a):
+        """True if code has the address a as an operand (relocated). A vtable
+        start is stored by the constructor (mov dword [ecx], vtable)."""
+        if code_ref_cache[0] != len(relocs):
+            code_ref_cache[1] = {t for f, t in relocs.items() if img.in_text(f)}
+            code_ref_cache[0] = len(relocs)
+        return a in code_ref_cache[1]
+
+    def is_mid(v):
+        """an instruction inside a function, not a start"""
+        return (v in insns and v not in code_starts
+                and not img.looks_like_function_start(v, insns, owner, noret_thunks))
 
     def flush_run(run):
         added = False
@@ -486,8 +687,28 @@ def _analyze_once(img, md, extra_code, data_regions):
             v = img.dword(a)
             stringy = img.looks_like_string(a)
             known = v in insns and not stringy
+            if (known and STRICT_DATA_CODE and is_mid(v) and len(run) <= 2
+                    and len({img.dword(x) for x in run if is_mid(img.dword(x))}) == 1):
+                # a data word equal to an instruction address in the middle
+                # of a function (0x00800080, a pixel mask in a D3DX format
+                # table, next to a function pointer): a number, not a code
+                # pointer. Only in runs of one or two words with one such
+                # value: longer tables of code labels stay (they may be real).
+                doubtful.append((a, v, "data word at an instruction inside a function, not used"))
+                continue
             if known:
                 add_reloc(a, v, "data:codeptr")
+                continue
+            if (STRICT_DATA_CODE and stringy and v % 16 == 0 and owner.get(v) is None and code_referenced(a)
+                    and img.looks_like_function_start(v, insns, owner, noret_thunks)
+                    and v not in rejected and v not in data_bytes):
+                # the first entry of a vtable (here a vtable with one entry)
+                # whose bytes look like text (0x00652c20: " ,e")
+                add_reloc(a, v, "data:codeptr")
+                if v not in code_starts:
+                    cur[0] = None
+                    add_root(v, "data")
+                    added = True
                 continue
             if stringy and img.is_ilt_thunk(v):
                 doubtful.append((a, v, "string-like pointer to a link thunk, USED"))
@@ -502,13 +723,27 @@ def _analyze_once(img, md, extra_code, data_regions):
                 doubtful.append((a, v, "string-like code pointer, not used"))
                 continue
             solid = sum(1 for x in run if not img.looks_like_string(x))
-            if solid >= 2 or img.looks_like_function_start(v):
+            if STRICT_DATA_CODE:
+                accept = img.looks_like_function_start(v, insns, owner, noret_thunks)
+                if not accept and len(run) >= 3 and v % 16 == 0 and owner.get(v) is None:
+                    # an entry of a vtable: the other entries are functions
+                    # (a switch table before this function hides its start)
+                    good = sum(1 for x in run if x != a and (
+                        img.dword(x) in insns or img.looks_like_function_start(img.dword(x), insns, owner, noret_thunks)))
+                    accept = good >= 2
+            else:
+                accept = solid >= 2 or img.looks_like_function_start(v)
+            if accept:
                 if v in data_bytes or (v in owner and owner[v] != v):
                     doubtful.append((a, v, "data pointer into the middle of code, not used"))
                     continue
+                if v in rejected:
+                    doubtful.append((a, v, "rejected code start, not a relocation"))
+                    continue
                 add_reloc(a, v, "data:codeptr")
                 if v not in code_starts:
-                    add_root(v)
+                    cur[0] = None
+                    add_root(v, "data")
                     added = True
             else:
                 doubtful.append((a, v, "lone code pointer to non-function start, not used"))
@@ -532,7 +767,8 @@ def _analyze_once(img, md, extra_code, data_regions):
     def force_code(fix, tgt, kind):
         add_reloc(fix, tgt, kind)
         code_labels.add(tgt)
-        add_root(tgt)
+        cur[0] = None
+        add_root(tgt, "eh")
 
     def parse_funcinfo(fi):
         max_state, unwind, ntry, trymap, nip, ipmap = [img.dword(fi + 4 * i) for i in range(1, 7)]
@@ -577,11 +813,27 @@ def _analyze_once(img, md, extra_code, data_regions):
         if not scan_data() and not roots:
             break
 
+    if STRICT_DATA_CODE:
+        # "and reg, A; add reg, B" is "x ? A + B : B": A is a difference,
+        # not an address (also for two function pointers, where B is one).
+        for fix, tgt in list(relocs.items()):
+            if kinds[fix] != "imm:and":
+                continue
+            i = insns.get(owner.get(fix))
+            if i is None:
+                continue
+            n = insns.get(i.address + i.size)
+            if (n is not None and n.mnemonic in ("add", "sub") and len(n.operands) == 2
+                    and n.operands[1].type == X.X86_OP_IMM and n.operands[0].type == X.X86_OP_REG
+                    and n.operands[0].reg == i.operands[0].reg):
+                del relocs[fix]
+                doubtful.append((fix, tgt, "and/add pair, a difference of constants, not a relocation"))
+
     for fix, tgt in list(relocs.items()):
         if tgt == img.base:
             doubtful.append((fix, tgt, "points to ImageBase (" + kinds[fix] + ")"))
         if img.in_text(tgt) and tgt in owner and owner[tgt] not in (tgt, -1):
-            if kinds[fix].startswith("imm:mov"):
+            if kinds[fix].startswith("imm:mov") or (STRICT_DATA_CODE and not kinds[fix].startswith("disp")):
                 # "mov [mem], 0x402848": a constant (flag bits) that happens to
                 # be in the .text range. A code address is never inside an
                 # instruction, so this is not a relocation.
@@ -593,6 +845,8 @@ def _analyze_once(img, md, extra_code, data_regions):
     return dict(insns=insns, owner=owner, relocs=relocs, kinds=kinds,
                 doubtful=doubtful, jump_tables=jump_tables, code_starts=code_starts,
                 overlaps=overlaps, conflicts=conflicts, data_bytes=data_bytes,
+                overlap_src=overlap_src, root_src=root_src, insroot=insroot,
+                noret_thunks=noret_thunks,
                 eh_funcinfos=eh_funcinfos, displaced=displaced)
 
 
@@ -618,7 +872,11 @@ def main():
     ap.add_argument("-r", "--report", default="relocations-report.txt")
     ap.add_argument("--extra-code", action="append", default=[],
                     help="extra code start address (hex), may repeat")
+    ap.add_argument("--strict-data-code", action="store_true",
+                    help="data pointers add new code only at function starts (see STRICT_DATA_CODE)")
     args = ap.parse_args()
+    global STRICT_DATA_CODE
+    STRICT_DATA_CODE = args.strict_data_code
     img = Image(args.exe)
     st = analyze(img, [int(x, 16) for x in args.extra_code])
     relocs, kinds = st["relocs"], st["kinds"]
@@ -642,6 +900,17 @@ def main():
         for t in targets:
             fh.write("loc_%X\n" % t)
 
+    # Thunks of imports that never return: SRW stops after a call to them.
+    # A game's own srw/llasm/noret_procedures.sci (copied here first) is kept.
+    noret_path = os.path.join(os.path.dirname(os.path.abspath(args.out)), "noret_procedures.sci")
+    lines = set()
+    if os.path.exists(noret_path):
+        lines = {l.strip() for l in open(noret_path) if l.strip()}
+    lines |= {"loc_%X" % va for va in st["noret_thunks"]}
+    with open(noret_path, "w") as fh:
+        for l in sorted(lines):
+            fh.write(l + "\n")
+
     # Labels inside an instruction (skipped jump table entries).
     with open(os.path.join(os.path.dirname(os.path.abspath(args.out)), "displaced_labels.sci"), "w") as fh:
         for va, n in sorted(st["displaced"].items()):
@@ -660,9 +929,13 @@ def main():
         by = collections.Counter(k.split(":")[0] for k in kinds.values())
         fh.write("by kind: %s\n" % dict(by))
         fh.write("overlaps/undecodable: %d\n" % len(set(st["overlaps"])))
+        fh.write("rejected code starts: %d\n" % len(st.get("rejected", ())))
         fh.write("\n# doubtful (check by hand)\n")
         for fix, tgt, why in sorted(set(st["doubtful"])):
             fh.write("0x%x -> 0x%x  %s\n" % (fix, tgt, why))
+        fh.write("\n# rejected code starts (made overlaps)\n")
+        for va in sorted(st.get("rejected", ())):
+            fh.write("0x%x\n" % va)
         fh.write("\n# overlaps\n")
         for va in sorted(set(st["overlaps"])):
             fh.write("0x%x\n" % va)

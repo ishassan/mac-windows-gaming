@@ -1,0 +1,24 @@
+diff --git a/llasm/llasm.d b/llasm/llasm.d
+index 6d0b790..dde5daa 100644
+--- a/llasm/llasm.d
++++ b/llasm/llasm.d
+@@ -3105,8 +3105,9 @@ bool process_proc_body(string proc_name)
+                         {
+                             register_state[i] = RegisterState.Empty;
+                         }
+-                        // todo: vycistit vsetko, alebo iba x86 registre ?
+-                        current_temporary_register = (string[string]).init; // clear list
++                        // Port change: temporary registers are local SSA values, a call
++                        // cannot change them, so they stay valid (SRW can put a call
++                        // between "cmp" and its "jcc", for example "mov fs:[0], esp").
+ 
+                         for (int i = 0; i < num_float_regs; i++)
+                         {
+@@ -3118,7 +3119,6 @@ bool process_proc_body(string proc_name)
+                         {
+                             register64_state[i] = RegisterState.Empty;
+                         }
+-                        current_temporary_register64 = (string[string]).init; // clear list
+                     }
+ 
+                     if (func.has_return_value)

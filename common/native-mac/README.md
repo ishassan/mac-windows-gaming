@@ -70,10 +70,16 @@ becomes a trap, listed in `build/srw/srw-traps.txt`), and stages the output.
 | `WinApi-d3d.c` | Direct3D 6 (IDirect3D3, IDirect3DDevice3) with a software rasterizer: transforms, lighting, textures, z-buffer, blending. The depth range is 0..1, and point lights use the Direct3D 6 attenuation rule, as in Wine. |
 | `WinApi-dinput.c` | DirectInput 5: system keyboard and mouse (no joysticks). |
 | `WinApi-dplay.c` | DirectPlay 4 objects without network (for games that make them at start-up). |
-| `WinApi-mss32.c`, `WinApi-mss32-redbook.c`, `audio-mixer.c`, `audio-decode.c` | Miles Sound System on a native mixer; MP3 samples in memory and CD audio from audio files (macOS AudioToolbox). |
+| `WinApi-mss32.c`, `WinApi-mss32-redbook.c`, `audio-mixer.c`, `audio-decode.c` | Miles Sound System on a native mixer; MP3 samples in memory and CD audio from audio files (macOS AudioToolbox). End-of-sample callbacks come from a service thread, or on the main thread (from `Sleep` and `PeekMessageA`) for a game with `GAME_MSS_EOS_MAIN_THREAD` in `game.h`. |
 | `WinApi-smackw32.c` | Smacker video decoder and player. |
 | `WinApi-amstream.c`, `video-avi.c` | DirectShow multimedia stream: AVI with Cinepak and MS ADPCM. |
-| `WinApi-winmm.c`, `WinApi-misc.c` | winmm timers, COM, registry, shell functions. |
+| `WinApi-winmm.c`, `WinApi-misc.c` | winmm timers, COM, shell functions, and the network stubs (sockets fail). |
+| `WinApi-registry.c` | A read-only registry with the values of the game's `runtime/game.h` (`GAME_REGISTRY_VALUES`). |
+| `WinApi-msvcrt.c`, `WinApi-msvcrt-eh.c` | The MSVCRT DLL (for games that import it, such as Generals): files, strings, scanf/printf, time, start-up; C++ exceptions (`_CxxThrowException`, `__CxxFrameHandler`) and the MSVC SEH handler. |
+| `WinApi-dinput8.c` | DirectInput 8 on the DirectInput 5 code. |
+| `WinApi-various.c` | Smaller kernel32, user32 and gdi32 functions and stubs that Generals needs. |
+| `d3d8/` | Direct3D 8 on DXVK and MoltenVK (only for games with `DXVK_INCLUDE` in `game.conf`): a guest wrapper for each DXVK object, lock buffers with tight pitches, kept system-memory locks, a list of display modes when the video driver has none (offscreen). `WinApi-d3d8-gen.c` comes from `tools/gen_d3d8.py`. |
+| `bink/` | Bink video on FFmpeg (only for games with `USE_BINK=1`). |
 | `lag-trace.c` | The `TRACE_LAG` measurements. |
 | `imports.spec` | One line per imported function: return type, name, parameters (`*` marks a pointer). |
 | `com/*.com` | COM interface lists in vtable order. |

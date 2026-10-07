@@ -72,6 +72,23 @@ RUNTIME_OBJ := $(addprefix $(OBJ)/rt/,$(notdir $(GAME_C:.c=.o) $(COMMON_C:.c=.o)
 vpath %.c runtime runtime/llasm $(COMMON)/runtime $(COMMON)/runtime/llasm
 RUNTIME_H   := $(wildcard runtime/*.h runtime/llasm/*.h $(COMMON)/runtime/*.h $(COMMON)/runtime/llasm/*.h)
 
+# Direct3D 8 on DXVK (runtime/d3d8): only for games with DXVK_INCLUDE in
+# game.conf (the DXVK source folder, for its native DirectX headers).
+ifneq ($(DXVK_INCLUDE),)
+D3D8_C      := $(wildcard $(COMMON)/runtime/d3d8/*.c)
+D3D8_OBJ    := $(addprefix $(OBJ)/d3d8/,$(notdir $(D3D8_C:.c=.o)))
+D3D8_CFLAGS := -I$(COMMON)/runtime/d3d8 -I$(DXVK_INCLUDE)/include/native/directx -I$(DXVK_INCLUDE)/include/native/windows
+endif
+
+# Bink video on FFmpeg (runtime/bink): only for games with USE_BINK=1 in
+# game.conf. FFmpeg (LGPL) comes from the conda env.
+ifeq ($(USE_BINK),1)
+BINK_C      := $(wildcard $(COMMON)/runtime/bink/*.c)
+BINK_OBJ    := $(addprefix $(OBJ)/bink/,$(notdir $(BINK_C:.c=.o)))
+BINK_CFLAGS := -I$(CONDA_PREFIX)/include
+BINK_LIBS   := $(addprefix $(CONDA_PREFIX)/lib/,libavformat.dylib libavcodec.dylib libavutil.dylib libswscale.dylib libswresample.dylib)
+endif
+
 # llasm glue and include files, staged into one folder (game files last, so they win).
 LLASM_SRC   := $(wildcard $(COMMON)/runtime/llasm/*.llasm $(COMMON)/runtime/llasm/*.llinc \
                           runtime/llasm/*.llasm runtime/llasm/*.llinc)
@@ -119,7 +136,7 @@ $(B)/srw/$(GAME_EXE):
 	cp "$(GAME_DIR)/$(GAME_EXE)" $@
 
 $(GEN)/$(GAME_LLASM).llasm: $(B)/srw/$(GAME_EXE) $(TOOLS)/gen_relocs.py $(TOOLS)/gen_extern.py $(TOOLS)/run-srw.sh \
-                            $(wildcard srw/llasm/*.sci) $(wildcard srw/*.txt) srw/SR.cfg $(STAGE)/stamp
+                            $(wildcard srw/llasm/*.sci) $(wildcard srw/*.txt) srw/SR.cfg $(STAGE)/stamp $(HOSTBIN)/SRW
 	$(TOOLS)/run-srw.sh
 
 $(GEN)/glue-asm.llasm $(GEN)/stubs.c: $(GEN)/imports.spec $(TOOLS)/gen_glue.py $(GEN)/$(GAME_LLASM).llasm $(STAGE)/stamp
@@ -156,12 +173,20 @@ $(OBJ)/rt/%.o: %.c $(RUNTIME_H)
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(OBJ)/d3d8/%.o: $(COMMON)/runtime/d3d8/%.c $(RUNTIME_H) $(wildcard $(COMMON)/runtime/d3d8/*.h)
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(D3D8_CFLAGS) -c $< -o $@
+
+$(OBJ)/bink/%.o: $(COMMON)/runtime/bink/%.c $(RUNTIME_H)
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(BINK_CFLAGS) -c $< -o $@
+
 $(OBJ)/stubs.o: $(GEN)/stubs.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # 4. Link
-$(B)/$(GAME_NAME): $(OBJ)/game.stamp $(GLUE_OBJ) $(COM_OBJ) $(RUNTIME_OBJ) $(OBJ)/stubs.o $(OBJ)/com-stubs.o
-	$(CXX) $(LDFLAGS) -o $@ $(OBJ)/game/*.o $(GLUE_OBJ) $(COM_OBJ) $(RUNTIME_OBJ) $(OBJ)/stubs.o $(OBJ)/com-stubs.o $(SDL_LIBS) $(FT_LIBS) $(EXTRA_LIBS)
+$(B)/$(GAME_NAME): $(OBJ)/game.stamp $(GLUE_OBJ) $(COM_OBJ) $(RUNTIME_OBJ) $(D3D8_OBJ) $(BINK_OBJ) $(OBJ)/stubs.o $(OBJ)/com-stubs.o
+	$(CXX) $(LDFLAGS) -o $@ $(OBJ)/game/*.o $(GLUE_OBJ) $(COM_OBJ) $(RUNTIME_OBJ) $(D3D8_OBJ) $(BINK_OBJ) $(OBJ)/stubs.o $(OBJ)/com-stubs.o $(SDL_LIBS) $(FT_LIBS) $(BINK_LIBS) $(EXTRA_LIBS)
 
 clean:
 	rm -rf $(GEN) $(OBJ) $(B)/$(GAME_NAME)

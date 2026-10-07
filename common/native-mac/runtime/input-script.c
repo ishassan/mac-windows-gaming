@@ -11,6 +11,7 @@
  *                              Ctrl+S, Shift+Tab, Alt+X, Cmd+Return hold a modifier)
  *      <ms> text <string>      typed text (WM_CHAR messages, as from a keyboard)
  *      <ms> shot <name>        save the next frame as $<GAME>_DUMP/<name>.bmp
+ *      <ms> focus <0|1>        the window loses (0) or gets (1) the focus
  *      <ms> quit               stop the program
  *  Positions are in game pixels. Lines that start with "#" are comments.
  *  MIT license, see README.md.
@@ -160,6 +161,15 @@ static int script_thread(void *unused)
         else if (strcmp(action, "shot") == 0 && sscanf(line, "%*u %*s %127s", arg) == 1)
         {
             Display_RequestShot(arg);
+        }
+        else if (strcmp(action, "focus") == 0 && sscanf(line, "%*u %*s %d", &x) == 1)
+        {
+            /* the window loses (0) or gets (1) the keyboard focus */
+            SDL_Event e;
+            memset(&e, 0, sizeof(e));
+            e.type = SDL_WINDOWEVENT;
+            e.window.event = x ? SDL_WINDOWEVENT_FOCUS_GAINED : SDL_WINDOWEVENT_FOCUS_LOST;
+            SDL_PushEvent(&e);
         }
         else if (strcmp(action, "quit") == 0)
         {

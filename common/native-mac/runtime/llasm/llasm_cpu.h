@@ -37,6 +37,7 @@ typedef struct {
 #endif
     int64_t _st_result;
     void *stack_bottom, *stack_top;
+    void *_reserved_mem;    /* port change: the allocation of this struct */
 } _cpu;
 
 #define CPU _cpu *cpu

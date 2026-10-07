@@ -67,6 +67,8 @@ void CCALL sync_c(void);
 #endif
 
 int CLIB_FindFile(const char *src, char *dst);
+void CLIB_SetCurrentDir(const char *path);
+const char *CLIB_GetCurrentDir(void);
 
 #endif
 

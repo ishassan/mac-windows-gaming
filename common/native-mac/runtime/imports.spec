@@ -5,6 +5,12 @@
 #   return: i = 32-bit value, p = pointer (converted), v = void
 #   params: a leading "*" marks a pointer (converted to a host pointer)
 #   cdecl functions with variable arguments: return "x" (see wsprintfA)
+#   "f": the result is a double on the x87 stack (the C function gets the
+#        CPU first and pushes it)
+#   a second letter gives the calling convention: "c" cdecl (the caller
+#   pops the params), "t" thiscall (the first param comes from ecx)
+#   "d": a data import (a variable of the DLL): no glue; a runtime C file
+#        defines the variable with the name <name>_asm2c
 # The C function is <name>_c. stdcall: the glue pops all params.
 
 # KERNEL32
@@ -358,3 +364,275 @@ i SmackSoundOnOff *smk on
 i SmackDDSurfaceType *lpDDS
 v SmackVolumePan *smk trackflag volume pan
 i SmackSoundUseMSS *dd
+# ---- Added for Generals Zero Hour (MSVC 6 with MSVCRT.dll, DirectX 8, Miles 6.5, Bink) ----
+# KERNEL32 (WinApi-kernel32-gzh.c)
+i DosDateTimeToFileTime wFatDate wFatTime *lpFileTime
+i FormatMessageA dwFlags *lpSource dwMessageId dwLanguageId *lpBuffer nSize *Arguments
+i FormatMessageW dwFlags *lpSource dwMessageId dwLanguageId *lpBuffer nSize *Arguments
+i GetComputerNameA *lpBuffer *nSize
+i GetDateFormatW Locale dwFlags *lpDate *lpFormat *lpDateStr cchDate
+i GetFileSize *hFile *lpFileSizeHigh
+i GetPriorityClass *hProcess
+i GetTempPathA nBufferLength *lpBuffer
+i GetThreadPriority *hThread
+i GetTimeFormatW Locale dwFlags *lpTime *lpFormat *lpTimeStr cchTime
+p GlobalHandle *pMem
+p GlobalLock *hMem
+i GlobalUnlock *hMem
+i IsProcessorFeaturePresent ProcessorFeature
+p LocalAlloc uFlags uBytes
+p LocalFree *hMem
+p MapViewOfFileEx *hFileMappingObject dwDesiredAccess dwFileOffsetHigh dwFileOffsetLow dwNumberOfBytesToMap *lpBaseAddress
+i MulDiv nNumber nNumerator nDenominator
+p OpenEventA dwDesiredAccess bInheritHandle *lpName
+i SetFileTime *hFile *lpCreationTime *lpLastAccessTime *lpLastWriteTime
+i TerminateThread *hThread dwExitCode
+i UnmapViewOfFile *lpBaseAddress
+# USER32
+i AdjustWindowRect *lpRect dwStyle bMenu
+p FindWindowA *lpClassName *lpWindowName
+i GetDoubleClickTime
+i GetKeyboardLayout idThread
+p LoadCursorFromFileA *lpFileName
+i MessageBoxW *hWnd *lpText *lpCaption uType
+i ScreenToClient *hWnd *lpPoint
+i SetForegroundWindow *hWnd
+i SetWindowTextW *hWnd *lpString
+# GDI32
+i AddFontResourceA *lpszFilename
+p CreateDIBSection *hdc *pbmi usage *ppvBits *hSection offset
+i ExtTextOutW *hdc X Y fuOptions *lprc *lpString cbCount *lpDx
+i GetTextExtentPoint32W *hdc *lpString c *lpSize
+i RemoveFontResourceA *lpFileName
+i RestoreDC *hdc nSavedDC
+i SaveDC *hdc
+i SetDeviceGammaRamp *hDC *lpRamp
+# ADVAPI32 (registry keys are plain values, see RegOpenKeyExA)
+i RegCreateKeyExA hKey *lpSubKey Reserved *lpClass dwOptions samDesired *lpSecurityAttributes *phkResult *lpdwDisposition
+i RegOpenKeyA hKey *lpSubKey *phkResult
+i RegQueryValueExA hKey *lpValueName *lpReserved *lpType *lpData *lpcbData
+i RegSetValueExA hKey *lpValueName Reserved dwType *lpData cbData
+# SHELL32
+i SHGetPathFromIDListA *pidl *pszPath
+i SHGetSpecialFolderLocation *hwndOwner nFolder *ppidl
+i SHGetSpecialFolderPathA *hwndOwner *lpszPath csidl fCreate
+# ole32, OLEAUT32 (the web browser of the online lobby: not supported)
+i OleInitialize *pvReserved
+i OleRun *pUnknown
+v OleUninitialize
+i GetErrorInfo dwReserved *pperrinfo
+i CreateStdDispatch *punkOuter *pvThis *ptinfo *ppunkStdDisp
+i LoadTypeLib *szFile *pptlib
+p SysAllocString *psz
+v SysFreeString *bstr
+i VariantClear *pvarg
+# IMM32 (input method editor: not supported; input contexts are plain values)
+i ImmAssociateContext *hWnd hIMC
+i ImmCreateContext
+i ImmDestroyContext hIMC
+i ImmGetCandidateListA hIMC deIndex *lpCandList dwBufLen
+i ImmGetCandidateListW hIMC deIndex *lpCandList dwBufLen
+i ImmGetCandidateListCountA hIMC *lpdwListCount
+i ImmGetCandidateListCountW hIMC *lpdwListCount
+i ImmGetCompositionStringA hIMC dwIndex *lpBuf dwBufLen
+i ImmGetCompositionStringW hIMC dwIndex *lpBuf dwBufLen
+i ImmGetContext *hWnd
+i ImmGetProperty hKL fdwIndex
+i ImmReleaseContext *hWnd hIMC
+# DBGHELP (crash reports: not supported, all fail)
+i StackWalk MachineType *hProcess *hThread *StackFrame *ContextRecord ReadMemoryRoutine FunctionTableAccessRoutine GetModuleBaseRoutine TranslateAddress
+i SymCleanup *hProcess
+i SymFunctionTableAccess *hProcess AddrBase
+i SymGetModuleBase *hProcess dwAddr
+i SymGetSymFromAddr *hProcess dwAddr *pdwDisplacement *Symbol
+i SymInitialize *hProcess *UserSearchPath fInvadeProcess
+i SymLoadModule *hProcess *hFile *ImageName *ModuleName BaseOfDll SizeOfDll
+i SymSetOptions SymOptions
+# AVIFIL32 (movie capture: not supported, all fail)
+v AVIFileInit
+v AVIFileExit
+i AVIFileOpenA *ppfile *szFile uMode *lpHandler
+i AVIFileCreateStreamA *pfile *ppavi *psi
+i AVIStreamSetFormat *pavi lPos *lpFormat cbFormat
+i AVIStreamWrite *pavi lStart lSamples *lpBuffer cbBuffer dwFlags *plSampWritten *plBytesWritten
+i AVIFileRelease *pfile
+i AVIStreamRelease *pavi
+# DINPUT8
+i DirectInput8Create *hinst dwVersion *riidltf *ppvOut *punkOuter
+# WSOCK32
+i ws_WSAGetLastError
+i ws___WSAFDIsSet s *set
+i ws_getsockname s *name *namelen
+i ws_getsockopt s level optname *optval *optlen
+i ws_htonl hostlong
+i ws_ntohl netlong
+i ws_ntohs netshort
+i ws_recvfrom s *buf len flags *from *fromlen
+i ws_sendto s *buf len flags *to tolen
+i ws_shutdown s how
+# MSS32 6.5 (handles are plain values; float parameters arrive as raw dwords)
+i AIL_3D_sample_playback_rate S
+i AIL_WAV_info *data *info
+i AIL_decompress_ADPCM *info *outdata *outsize
+i AIL_enumerate_filters *next *dest *name
+v AIL_get_DirectSound_info S *lplpDS *lplpDSB
+v AIL_quick_handles *pdig *pmdi *pdls
+i AIL_quick_load_and_play *filename loop_count wait_request
+v AIL_quick_set_volume audio volume extravol
+i AIL_quick_startup use_digital use_MIDI output_rate output_bits output_channels
+v AIL_quick_unload audio
+i AIL_register_3D_EOS_callback S EOS
+i AIL_register_stream_callback stream callback
+i AIL_sample_playback_rate S
+v AIL_sample_volume_pan S *volume *pan
+v AIL_set_3D_orientation obj X_face Y_face Z_face X_up Y_up Z_up
+v AIL_set_3D_sample_distances S max_dist min_dist
+v AIL_set_3D_sample_occlusion S occlusion
+v AIL_set_3D_sample_playback_rate S playback_rate
+v AIL_set_3D_speaker_type lib speaker_type
+v AIL_set_file_callbacks opencb closecb seekcb readcb
+i AIL_set_filter_sample_preference S *name *val
+p AIL_set_redist_directory *dir
+v AIL_set_sample_playback_rate S playback_rate
+i AIL_set_sample_processor S pipeline_stage provider
+v AIL_set_sample_volume_pan S volume pan
+v AIL_set_stream_volume_pan stream volume pan
+i AIL_stream_loop_count stream
+v AIL_stream_ms_position stream *total_milliseconds *current_milliseconds
+v AIL_stream_volume_pan stream *volume *pan
+# BINKW32 (WinApi-binkw32.c); Bink handles are guest pointers to a BINK struct
+p BinkOpen *name flags
+v BinkClose *bnk
+i BinkCopyToBuffer *bnk *dest destpitch destheight destx desty flags
+i BinkDoFrame *bnk
+v BinkGoto *bnk frame flags
+v BinkNextFrame *bnk
+i BinkOpenDirectSound param
+i BinkSetSoundSystem open param
+v BinkSetSoundTrack total_tracks *tracks
+v BinkSetVolume *bnk trackid volume
+i BinkWait *bnk
+# MSVCRT, MSVCIRT (WinApi-msvcrt.c): cdecl ("c"); Windows wide characters are 16-bit
+ic _XcptFilter xcptnum *pxcptinfoptrs
+ic __dllonexit func *pbegin *pend
+ic __getmainargs *argc *argv *env doWildCard *startupinfo
+pc __p__commode
+pc __p__fmode
+vc __set_app_type apptype
+vc __setusermatherr handler
+ic _access *path mode
+ic _chmod *path mode
+ic _close fd
+ic _controlfp new mask
+pc _errno
+ic _except_handler3 ExceptionRecord EstablisherFrame ContextRecord DispatcherContext
+v _CxxThrowException pExceptionObject pThrowInfo
+vc _exit status
+ic _finite xlo xhi
+vc _fpreset
+ic _fstat fd *buf
+pc _getcwd *buf size
+vc _initterm *pfbegin *pfend
+ic _isctype c mask
+ic _isnan xlo xhi
+pc _itoa value *str radix
+ic _lseek fd offset origin
+ic _mbscmp *s1 *s2
+ic _mbslen *s
+ic _mbsnccnt *s n
+ic _mkdir *path
+ic _onexit func
+x _open *path oflag
+ic _read fd *buf count
+x _snprintf *buf count *format
+x _spawnl mode *cmdname
+vc _splitpath *path *drive *dir *fname *ext
+ic _stat *path *buf
+ic _statusfp
+pc _strdup *s
+pc _strlwr *s
+ic _strnicmp *s1 *s2 n
+pc _strupr *s
+ic _vsnprintf *buf count *format *ap
+ic _vsnwprintf *buf count *format *ap
+ic _wcsicmp *s1 *s2
+ic _write fd *buf count
+ic _wtoi *s
+pc asctime *tm
+fc atof *s
+ic atoi *s
+pc bsearch *key *base num width compare
+ic clock
+vc exit status
+ic fclose *f
+ic fflush *f
+ic fgetc *f
+pc fgets *s n *f
+ic fgetwc *f
+pc fopen *filename *mode
+x fprintf *f *format
+ic fputc c *f
+ic fputwc c *f
+ic fread *ptr size n *f
+x fscanf *f *format
+ic fseek *f offset origin
+ic ftell *f
+x fwprintf *f *format
+ic fwrite *ptr size n *f
+ic isalnum c
+ic isalpha c
+ic isdigit c
+ic isspace c
+ic iswalnum c
+ic iswalpha c
+ic iswascii c
+ic iswdigit c
+ic iswspace c
+pc localtime *timer
+pc memmove *dest *src n
+vc qsort *base num width compare
+pc realloc *ptr size
+ic remove *path
+ic rename *oldname *newname
+vc rewind *f
+pc setlocale category *locale
+pc strchr *s c
+ic strcspn *s1 *s2
+ic strftime *s max *format *tm
+pc strpbrk *s1 *s2
+pc strrchr *s c
+ic strspn *s1 *s2
+pc strstr *s1 *s2
+pc strtok *s *delim
+ic strtol *s *endptr base
+ic strtoul *s *endptr base
+x swscanf *s *format
+ic time *timer
+ic tolower c
+ic vsprintf *buf *format *ap
+pc wcscat *dest *src
+pc wcschr *s c
+ic wcscmp *s1 *s2
+pc wcscpy *dest *src
+ic wcscspn *s1 *s2
+ic wcslen *s
+pc wcsncpy *dest *src n
+pc wcsrchr *s c
+ic wcsspn *s1 *s2
+pc wcsstr *s1 *s2
+pt exception_ctor *this
+pt exception_copy_ctor *this *other
+vt exception_dtor *this
+vt type_info_dtor *this
+# vftable of the MSVCIRT class exception (not imports: WinApi-msvcrt.c takes their addresses)
+pt exception_sdtor *this flags
+pt exception_what *this
+vc cxx_terminate
+ic cxx_set_se_translator func
+d _iob
+d _acmdln
+d _pctype
+d __mb_cur_max
+d _adjust_fdiv
+# D3D8 (WinApi-d3d8.c): loaded with LoadLibraryA("D3D8.DLL") and GetProcAddress
+p Direct3DCreate8 SDKVersion

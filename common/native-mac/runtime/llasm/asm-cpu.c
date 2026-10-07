@@ -25,6 +25,9 @@
 #include "../Game-Memory.h"
 #include "llasm_cpu.h"
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/mman.h>
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 // C11
@@ -62,12 +65,29 @@ EXTERNC _cpu *x86_initialize_cpu(void)
     cpu = thread_cpu;
     if (cpu != NULL) return cpu;
 
-    stack_bottom = x86_malloc(1024 * 1024 - 8);
-    if (stack_bottom == NULL) exit(2);
-
-    cpu = (_cpu *)((1024 * 1022 + (uintptr_t)stack_bottom) & ~(uintptr_t)127);
-    cpu->stack_bottom = stack_bottom;
-    cpu->stack_top = (void *)(1024 * 1020 + (uintptr_t)stack_bottom);
+    /* Port change: a 2 MB stack between two guard pages (no access), so
+       that an x86 stack that runs past either end stops at once. The CPU
+       state is in host memory, away from the stack (before, it was just
+       above the stack top, and a stack that ran past the top changed it). */
+    {
+        uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+        size_t stack_size = 2 * 1024 * 1024;
+        stack_bottom = x86_malloc((unsigned int)(stack_size + 3 * page));
+        if (stack_bottom == NULL) exit(2);
+        uintptr_t low_guard = ((uintptr_t)stack_bottom + page - 1) & ~(page - 1);
+        uintptr_t high_guard = low_guard + page + stack_size;
+        mprotect((void *)low_guard, page, PROT_NONE);
+        mprotect((void *)high_guard, page, PROT_NONE);
+        /* guest memory: some helpers give the x86 code a pointer into it
+           (x87_ftol_int64: _st_result) */
+        void *cpu_mem = x86_malloc(sizeof(_cpu) + 256);
+        if (cpu_mem == NULL) exit(2);
+        cpu = (_cpu *)(((uintptr_t)cpu_mem + 127) & ~(uintptr_t)127);
+        memset(cpu, 0, sizeof(_cpu));
+        cpu->_reserved_mem = cpu_mem;
+        cpu->stack_bottom = stack_bottom;
+        cpu->stack_top = (void *)(high_guard - 64);
+    }
 
     cpu->_st_top = 0;
     cpu->_st_sw_cond = 0;
@@ -97,12 +117,18 @@ EXTERNC void x86_deinitialize_cpu(void)
 
     if (cpu->stack_bottom != NULL)
     {
+        uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+        size_t stack_size = 2 * 1024 * 1024;
         stack_bottom = cpu->stack_bottom;
+        uintptr_t low_guard = ((uintptr_t)stack_bottom + page - 1) & ~(page - 1);
+        mprotect((void *)low_guard, page, PROT_READ | PROT_WRITE);
+        mprotect((void *)(low_guard + page + stack_size), page, PROT_READ | PROT_WRITE);
         cpu->stack_bottom = NULL;
         x86_free(stack_bottom);
     }
 
     thread_cpu = NULL;
+    x86_free(cpu->_reserved_mem);
 }
 
 
@@ -201,6 +227,17 @@ static void crash_handler(int sig, siginfo_t *info, void *context)
         fprintf(stderr, "host pc 0x%llx lr 0x%llx (unslid)\n",
                 (unsigned long long)(uc->uc_mcontext->__ss.__pc - slide),
                 (unsigned long long)(uc->uc_mcontext->__ss.__lr - slide));
+        /* the library and symbol of pc and lr (a crash in a system or DXVK library) */
+        {
+            uint64_t addrs[2] = { uc->uc_mcontext->__ss.__pc, uc->uc_mcontext->__ss.__lr };
+            for (int k = 0; k < 2; k++)
+            {
+                Dl_info di;
+                if (dladdr((void *)(uintptr_t)addrs[k], &di) && di.dli_fname)
+                    fprintf(stderr, "host %s: %s %s+0x%llx\n", k ? "lr" : "pc", di.dli_fname, di.dli_sname ? di.dli_sname : "?",
+                            (unsigned long long)(addrs[k] - (uint64_t)(uintptr_t)(di.dli_saddr ? di.dli_saddr : di.dli_fbase)));
+            }
+        }
     }
     if (cpu != NULL)
     {

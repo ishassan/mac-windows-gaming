@@ -31,6 +31,7 @@ the repository has a script that makes the change on your own copy.
 | Commandos: Behind Enemy Lines (1998) | [games/commandos-behind-enemy-lines/native-mac/](games/commandos-behind-enemy-lines/native-mac/) (our port) | [games/commandos-behind-enemy-lines/wine/](games/commandos-behind-enemy-lines/wine/) | Single-player works: videos, menus, missions, save and load. |
 | Revenant (1999) | [games/revenant/native-mac/](games/revenant/native-mac/) (our port) | [games/revenant/wine/](games/revenant/wine/) | Single-player works: intro video, menus, new game, walking and talking, load and save, music. Not played to the end. |
 | Command & Conquer Generals Zero Hour (2003) | [games/command-and-conquer-generals-zero-hour/native-mac/](games/command-and-conquer-generals-zero-hour/native-mac/) (a community port, not ours; our fork of it is the submodule `GeneralsX/`) | [games/command-and-conquer-generals-zero-hour/wine/](games/command-and-conquer-generals-zero-hour/wine/) | Reaches the main menu (community port 1.0.2). |
+| Command & Conquer Generals Zero Hour (2003), pilot | [games/command-and-conquer-generals-zero-hour/native-recompile/](games/command-and-conquer-generals-zero-hour/native-recompile/) (our recompile of the 1.04 exe, Direct3D 8 on DXVK and MoltenVK) | (same as above) | Pilot: menus, 3D menu scene, skirmish (10 minutes), campaign start, saves load both ways with Wine 8. |
 
 ## Layout
 

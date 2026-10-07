@@ -257,10 +257,48 @@ EXTERN_C uint32_t GetModuleFileNameA_c(void *hModule, char *lpFilename, uint32_t
     return (uint32_t)n;
 }
 
+/*
+ * DLLs that a game loads with LoadLibraryA: the runtime has their functions
+ * (DYNAMIC_EXPORTS below). The module handle is a guest block with the
+ * index of the DLL. Other DLLs are not available.
+ */
+EXTERN_C void Direct3DCreate8_asm2c(void);
+
+static const struct { const char *dll, *name; void (*proc)(void); } dynamic_exports[] = {
+    { "d3d8.dll", "Direct3DCreate8", Direct3DCreate8_asm2c },
+};
+
+#define NUM_DYNAMIC_EXPORTS (sizeof(dynamic_exports) / sizeof(dynamic_exports[0]))
+
+/* the module handles that LoadLibraryA gave (other handles, for example
+   from GetModuleHandleA, do not point to readable memory) */
+static void *dynamic_handles[NUM_DYNAMIC_EXPORTS];
+
+static const char *base_name(const char *path)
+{
+    const char *b = path;
+    for (const char *p = path; *p; p++) if (*p == '\\' || *p == '/') b = p + 1;
+    return b;
+}
+
 EXTERN_C void *LoadLibraryA_c(const char *lpLibFileName)
 {
+    const char *name = lpLibFileName ? base_name(lpLibFileName) : "";
+    for (size_t i = 0; i < NUM_DYNAMIC_EXPORTS; i++)
+    {
+        if (strcasecmp(name, dynamic_exports[i].dll) == 0)
+        {
+            if (dynamic_handles[i] == NULL)
+            {
+                uint32_t *h = (uint32_t *)x86_calloc(1, 8);
+                h[0] = 0x4c4c4428;   /* "(DLL" */
+                h[1] = (uint32_t)i;
+                dynamic_handles[i] = h;
+            }
+            return dynamic_handles[i];
+        }
+    }
     fprintf(stderr, "LoadLibraryA(%s): not available (caller %s)\n", lpLibFileName ? lpLibFileName : "", guest_caller());
-    x86_print_stack_trace(256);
     Winapi_SetLastError(ERROR_FILE_NOT_FOUND);
     return NULL;
 }
@@ -272,6 +310,19 @@ EXTERN_C uint32_t FreeLibrary_c(void *hLibModule)
 
 EXTERN_C uint32_t GetProcAddress_c(void *hModule, const char *lpProcName)
 {
+    int known = 0;
+    for (size_t i = 0; i < NUM_DYNAMIC_EXPORTS; i++) if (hModule != NULL && hModule == dynamic_handles[i]) known = 1;
+    if (known && (uintptr_t)lpProcName > 0xffff + pointer_offset)
+    {
+        const char *dll = dynamic_exports[rd32((uint8_t *)hModule + 4)].dll;
+        for (size_t i = 0; i < NUM_DYNAMIC_EXPORTS; i++)
+        {
+            if (strcasecmp(dll, dynamic_exports[i].dll) == 0 && strcmp(lpProcName, dynamic_exports[i].name) == 0)
+            {
+                return to_guest((const void *)dynamic_exports[i].proc);
+            }
+        }
+    }
     /* The C runtime asks for optional functions (EncodePointer,
        IsProcessorFeaturePresent, ...) and works without them. */
     Winapi_SetLastError(127); /* ERROR_PROC_NOT_FOUND */
@@ -447,17 +498,30 @@ EXTERN_C uint32_t SetEnvironmentVariableA_c(const char *lpName, const char *lpVa
 
 /* --------------------------------------------------- files and folders */
 
+
+/* The current directory is a folder under drive C: (the game folder). The
+   host process keeps its own; CLIB_FindFile adds this one to relative
+   paths (Generals lists its saves with SetCurrentDirectoryA and "*"). */
 EXTERN_C uint32_t GetCurrentDirectoryA_c(uint32_t nBufferLength, char *lpBuffer)
 {
-    const char *cur = "C:\\";
-    if (nBufferLength < 4) return 4;
+    char cur[1100];
+    snprintf(cur, sizeof(cur), "C:\\%s", CLIB_GetCurrentDir());
+    uint32_t n = (uint32_t)strlen(cur);
+    if (nBufferLength < n + 1) return n + 1;
     strcpy(lpBuffer, cur);
-    return 3;
+    return n;
 }
 
 EXTERN_C uint32_t SetCurrentDirectoryA_c(const char *lpPathName)
 {
-    LOG_ONCE("SetCurrentDirectoryA(%s): ignored\n", lpPathName ? lpPathName : "");
+    char buf[2048];
+    struct stat st;
+    if (lpPathName == NULL || !CLIB_FindFile(lpPathName, buf) || stat(buf, &st) != 0 || !S_ISDIR(st.st_mode))
+    {
+        Winapi_SetLastError(ERROR_PATH_NOT_FOUND);
+        return 0;
+    }
+    CLIB_SetCurrentDir(lpPathName);
     return 1;
 }
 

@@ -185,72 +185,7 @@ int32_t CCALL sprintf2_c(char *str, const char *format, uint32_t *ap)
     return res;
 }
 
-int32_t CCALL sscanf2_c(const char *str, const char *format, uint32_t *ap)
-{
-#define MAX_VALUES 2
-    int res, num, index;
-    uintptr_t values[MAX_VALUES];
-    void *ptrvals[MAX_VALUES];
-
-#ifdef DEBUG_CLIB
-    eprintf("sscanf: 0x%" PRIxPTR " (%s), 0x%" PRIxPTR " (%s) - ", (uintptr_t) str, str, (uintptr_t) format, format);
-#endif
-
-    num = 0;
-    if (format != NULL)
-    {
-        for (index = 0; format[index] != 0; index++)
-        {
-            if (format[index] == '%')
-            {
-                num++;
-                if (num > MAX_VALUES) break;
-
-                if (format[index + 1] == 's')
-                {
-                    ptrvals[num - 1] = (void *)((PTR32(void) *)ap)[num - 1];
-                }
-                else if (format[index + 1] == 'd')
-                {
-                    ptrvals[num - 1] = &(values[num - 1]);
-                }
-                else
-                {
-                    eprintf("sscanf: unsupported format: %s\n", format);
-                    exit(1);
-                }
-            }
-        }
-    }
-
-    switch (num)
-    {
-        case 1:
-            res = sscanf(str, format, ptrvals[0]);
-            break;
-        case 2:
-            res = sscanf(str, format, ptrvals[0], ptrvals[1]);
-            break;
-        default:
-            eprintf("sscanf: unsupported format: %s\n", format);
-            exit(1);
-    }
-
-    for (index = 0; index < res; index++)
-    {
-        if (ptrvals[index] == &(values[index]))
-        {
-            *((uint32_t *)((PTR32(uint32_t) *)ap)[index]) = (uint32_t)values[index];
-        }
-    }
-
-#ifdef DEBUG_CLIB
-    eprintf("%i\n", res);
-#endif
-
-    return res;
-#undef MAX_VALUES
-}
+/* sscanf2_c: see WinApi-msvcrt.c (all conversions, guest pointers) */
 
 
 int32_t CCALL system_c(const char *command)
@@ -405,13 +340,47 @@ void CCALL sync_c(void)
  * only the drive letter and the backslashes change.
  * Returns 1 if the file exists, 0 if not (dst is filled in both cases).
  */
+/* Port change: the current directory of the guest, relative to drive C:
+   (empty: C:\\). Relative paths start there (SetCurrentDirectoryA). */
+static char clib_cur_dir[1024];
+
+void CLIB_SetCurrentDir(const char *path)
+{
+    char tmp[1024];
+    int absolute = 0;
+    if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) && path[1] == ':')
+    {
+        path += 2;
+        absolute = 1;
+    }
+    if (*path == '\\' || *path == '/') absolute = 1;
+    while (*path == '\\' || *path == '/') path++;
+    if (absolute || clib_cur_dir[0] == 0) snprintf(tmp, sizeof(tmp), "%s", path);
+    else snprintf(tmp, sizeof(tmp), "%s\\%s", clib_cur_dir, path);
+    size_t n = strlen(tmp);
+    while (n > 0 && (tmp[n - 1] == '\\' || tmp[n - 1] == '/')) tmp[--n] = 0;
+    strcpy(clib_cur_dir, tmp);
+}
+
+const char *CLIB_GetCurrentDir(void)
+{
+    return clib_cur_dir;
+}
+
 int CLIB_FindFile(const char *src, char *dst)
 {
     char *d;
+    char joined[2048];
 
     if (((src[0] >= 'A' && src[0] <= 'Z') || (src[0] >= 'a' && src[0] <= 'z')) && src[1] == ':')
     {
         src += 2;
+    }
+    else if (clib_cur_dir[0] != 0 && src[0] != '\\' && src[0] != '/')
+    {
+        /* relative to the current directory */
+        snprintf(joined, sizeof(joined), "%s%s%s", clib_cur_dir, src[0] ? "\\" : "", src);
+        src = joined;
     }
     while (*src == '\\' || *src == '/')
     {

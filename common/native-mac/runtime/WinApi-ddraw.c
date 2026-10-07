@@ -311,6 +311,14 @@ EXTERN_C void Display_RequestShot(const char *name)
     SDL_AtomicSet(&shot_pending, 1);
 }
 
+/* For other display code (Direct3D 8): 1 and the name if a shot is pending */
+EXTERN_C int Display_TakeShotRequest(char *name, int size)
+{
+    if (!SDL_AtomicCAS(&shot_pending, 1, 0)) return 0;
+    snprintf(name, size, "%s", shot_name);
+    return 1;
+}
+
 static void save_shot(void)
 {
     const char *dir = game_getenv("DUMP");

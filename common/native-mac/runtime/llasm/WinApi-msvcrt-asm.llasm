@@ -1,0 +1,33 @@
+;; Port change: MSVCRT.dll functions with a special calling convention.
+;; MIT license, see README.md.
+
+include llasm.llinc
+include asm-calls.llinc
+
+func __CxxFrameHandler_c funcinfo, record, frame, context, dispatcher
+
+proc __CxxFrameHandler_asm2c public
+
+; The C++ exception handler of MSVC (WinApi-msvcrt-eh.c). The SEH
+; dispatcher calls a small thunk of the function ("mov eax, FuncInfo;
+; jmp __CxxFrameHandler"), so eax is the FuncInfo of the function.
+; [esp + 4*4] = DispatcherContext
+; [esp + 3*4] = ContextRecord
+; [esp + 2*4] = EstablisherFrame
+; [esp +   4] = ExceptionRecord
+; [esp      ] = return address (cdecl)
+
+        mov tmp0, eax
+        add tmp1, esp, 4
+        load tmp1, tmp1, 4
+        add tmp2, esp, 2*4
+        load tmp2, tmp2, 4
+        add tmp3, esp, 3*4
+        load tmp3, tmp3, 4
+        add tmp4, esp, 4*4
+        load tmp4, tmp4, 4
+        call __CxxFrameHandler_c tmp0, tmp1, tmp2, tmp3, tmp4
+        mov eax, tmp0
+        Call_Asm_Return 0
+
+endp ; end procedure __CxxFrameHandler_asm2c

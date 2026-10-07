@@ -1019,6 +1019,54 @@ static int check_controller_event(SDL_Event *event, int remove)
 
 extern "C" void DDraw_ToggleFullscreen(void);
 
+/* Port change: a window that a 3D API (Direct3D 8 on DXVK) draws into has
+ * no SDL renderer, so SDL does not scale the mouse positions to the game's
+ * screen. User32_SetClientWindow gives the window and the size of the
+ * game's screen (the back buffer); mouse events are then scaled here. */
+static SDL_Window *client_window;
+static int client_w, client_h;
+extern int Game_ClientWidth;
+extern int Game_ClientHeight;
+
+extern "C" void User32_SetClientWindow(SDL_Window *window, int width, int height)
+{
+    client_window = window;
+    client_w = width;
+    client_h = height;
+    mouse_window = window;
+    mouse_renderer = NULL;
+    mouse_clip_w = width;
+    mouse_clip_h = height;
+    Game_ClientWidth = width;
+    Game_ClientHeight = height;
+}
+
+static void scale_client_xy(Sint32 *x, Sint32 *y)
+{
+    int ww, wh;
+    SDL_GetWindowSize(client_window, &ww, &wh);
+    if (ww <= 0 || wh <= 0) return;
+    *x = (Sint32)((int64_t)*x * client_w / ww);
+    *y = (Sint32)((int64_t)*y * client_h / wh);
+}
+
+static void scale_client_event(SDL_Event *event)
+{
+    if (client_window == NULL) return;
+    if (event->type == SDL_MOUSEMOTION)
+    {
+        Sint32 x0 = event->motion.x - event->motion.xrel, y0 = event->motion.y - event->motion.yrel;
+        scale_client_xy(&event->motion.x, &event->motion.y);
+        scale_client_xy(&x0, &y0);
+        event->motion.xrel = event->motion.x - x0;
+        event->motion.yrel = event->motion.y - y0;
+    }
+    else if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP)
+    {
+        scale_client_xy(&event->button.x, &event->button.y);
+    }
+}
+
 static int find_event(SDL_Event *event, int remove, int wait)
 {
     int pump_events, can_sleep;
@@ -1099,6 +1147,7 @@ static int find_event(SDL_Event *event, int remove, int wait)
 
 
         keep_event = 0;
+        scale_client_event(event);
         switch (event->type)
         {
         case SDL_KEYDOWN:
@@ -3104,8 +3153,20 @@ void * CCALL LoadImageA_c(void *hinst, const char *lpszName, uint32_t uType, int
         }
     }
 
-    eprintf("Unsupported method: %s\n", "LoadImageA");
-    exit(1);
+    /* Port change: icons and cursors (from resources or files) are not
+       shown; the handle only has to be different from NULL. Bitmaps are
+       not supported. */
+    if (uType == 1 || uType == 2)   /* IMAGE_ICON, IMAGE_CURSOR */
+    {
+        static uint32_t next = 0xfb00;
+        next += 4;
+        if (next >= 0xfc00) next = 0xfb04;
+        return (void *)(uintptr_t)(pointer_offset + next);
+    }
+
+    eprintf("LoadImageA(%s, type %u): not supported\n", ((uintptr_t)lpszName > 0xffff + pointer_offset) ? lpszName : "(resource id)", uType);
+    Winapi_SetLastError(ERROR_FILE_NOT_FOUND);
+    return NULL;
 }
 
 uint32_t CCALL MessageBoxA_c(void *hWnd, const char *lpText, const char *lpCaption, uint32_t uType)
@@ -3271,8 +3332,11 @@ uint32_t CCALL OffsetRect_c(void *lprc, int32_t dx, int32_t dy)
     return 1;
 }
 
+extern "C" void Miles_ServiceCallbacks(void);
+
 uint32_t CCALL PeekMessageA_c(void *lpMsg, void *hWnd, uint32_t wMsgFilterMin, uint32_t wMsgFilterMax, uint32_t wRemoveMsg)
 {
+    Miles_ServiceCallbacks();
     DDraw_PresentIfDirty();
 #ifdef DEBUG_USER32
     eprintf("PeekMessageA: 0x%" PRIxPTR ", %i, %i, %i\n", (uintptr_t)hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);

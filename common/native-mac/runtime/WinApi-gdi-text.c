@@ -41,7 +41,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <map>
+#include <vector>
 #include "guest.h"
+#include "Game-Memory.h"
 #include "platform.h"
 
 #define WINDOW_HDC   0xfde0u    /* FAKE_HDC of WinApi-user32.c */
@@ -94,10 +96,13 @@ typedef struct {
     int ave_width, max_width, weight, italic, underline, strikeout, charset, pitch_family;
     char face[32];
     glyph *glyphs[256];
+    std::map<UniChar, glyph *> *wglyphs;   /* wide characters (ExtTextOutW) */
 } gdi_font;
 
 typedef struct {
-    void *surface;        /* NULL: window DC */
+    void *surface;        /* NULL: window DC or memory DC */
+    uint32_t dib;         /* memory DC: the selected DIB section (0: none) */
+    int memory;           /* made by CreateCompatibleDC */
     uint32_t font;
     uint32_t text_color, bk_color;
     int bk_mode;
@@ -107,6 +112,18 @@ typedef struct {
     int org_x, org_y;
 } gdi_dc;
 
+/* A DIB section (CreateDIBSection): bits in guest memory */
+typedef struct {
+    uint8_t *bits;
+    int width, height, bpp, pitch;
+    int bottom_up;        /* biHeight > 0: the first row in memory is the bottom row */
+} gdi_dib;
+
+#define DIB_FIRST    0xb000u
+#define DIB_LAST     0xbffcu
+
+static std::map<uint32_t, gdi_dib *> dibs;
+static uint32_t next_dib = DIB_FIRST;
 static std::map<uint32_t, gdi_font *> fonts;
 static std::map<uint32_t, gdi_dc *> dcs;
 static uint32_t next_font = FONT_FIRST, next_dc = DC_FIRST;
@@ -189,9 +206,8 @@ static FT_Face open_ft_face(CTFontRef ct, int32_t height)
     return face;
 }
 
-static int advance_of(gdi_font *f, uint8_t c)
+static int advance_of_u(gdi_font *f, UniChar u)
 {
-    UniChar u = unicode_of(c);
     CGGlyph g;
     CGSize adv;
     if (f->ft)
@@ -204,6 +220,11 @@ static int advance_of(gdi_font *f, uint8_t c)
     if (!CTFontGetGlyphsForCharacters(f->ct, &u, &g, 1)) return 0;
     CTFontGetAdvancesForGlyphs(f->ct, kCTFontOrientationHorizontal, &g, &adv, 1);
     return (int)lround(adv.width);
+}
+
+static int advance_of(gdi_font *f, uint8_t c)
+{
+    return advance_of_u(f, unicode_of(c));
 }
 
 static uint32_t create_font(int32_t height, int32_t width, int32_t weight, int italic, int underline, int strikeout,
@@ -265,18 +286,25 @@ static void free_font(gdi_font *f)
         if (f->glyphs[i]) free(f->glyphs[i]->bits);
         free(f->glyphs[i]);
     }
+    if (f->wglyphs)
+    {
+        for (auto &g : *f->wglyphs)
+        {
+            free(g.second->bits);
+            free(g.second);
+        }
+        delete f->wglyphs;
+    }
     if (f->ft) FT_Done_Face(f->ft);
     CFRelease(f->ct);
     free(f);
 }
 
-static glyph *glyph_of(gdi_font *f, uint8_t c)
+static glyph *make_glyph(gdi_font *f, UniChar u)
 {
-    if (f->glyphs[c]) return f->glyphs[c];
     glyph *g = (glyph *)calloc(1, sizeof(glyph));
-    f->glyphs[c] = g;
-    g->advance = advance_of(f, c);
-    UniChar u = unicode_of(c);
+    g->advance = advance_of_u(f, u);
+    int c = (u < 32) ? (int)u : 32;   /* control characters: no bitmap */
     CGGlyph cg;
     if (f->ft)
     {
@@ -327,6 +355,24 @@ static glyph *glyph_of(gdi_font *f, uint8_t c)
     g->bits = (uint8_t *)malloc(g->w * g->h);
     for (int i = 0; i < g->w * g->h; i++) g->bits[i] = (cov[i] >= 128) ? 255 : 0;
     free(cov);
+    return g;
+}
+
+static glyph *glyph_of(gdi_font *f, uint8_t c)
+{
+    if (f->glyphs[c] == NULL) f->glyphs[c] = make_glyph(f, unicode_of(c));
+    return f->glyphs[c];
+}
+
+/* a wide character (UTF-16 code unit) */
+static glyph *glyph_of_w(gdi_font *f, uint16_t u)
+{
+    if (u < 0x80 || (u >= 0xa0 && u < 0x100)) return glyph_of(f, (uint8_t)u);
+    if (f->wglyphs == NULL) f->wglyphs = new std::map<UniChar, glyph *>();
+    auto it = f->wglyphs->find(u);
+    if (it != f->wglyphs->end()) return it->second;
+    glyph *g = make_glyph(f, u);
+    (*f->wglyphs)[u] = g;
     return g;
 }
 
@@ -400,11 +446,47 @@ typedef struct {
     uint8_t fg_rgb[3];         /* the text color, 8 bits per channel */
     int has_key;
     uint32_t key_low, key_high;
+    int bottom_up;
 } target;
 
 static int open_target(gdi_dc *d, target *t)
 {
     uint8_t pf[32];
+    t->bottom_up = 0;
+    if (d->surface == NULL && d->dib != 0)
+    {
+        auto it = dibs.find(d->dib);
+        if (it == dibs.end()) return 0;
+        gdi_dib *b = it->second;
+        if (b->bpp != 16 && b->bpp != 24 && b->bpp != 32)
+        {
+            LOG_ONCE("GDI: text on a %d-bit DIB is not drawn\n", b->bpp);
+            return 0;
+        }
+        t->pixels = b->bits;
+        t->pitch = b->pitch;
+        t->width = b->width;
+        t->height = b->height;
+        t->bpp = b->bpp;
+        t->bottom_up = b->bottom_up;
+        /* DIB (BI_RGB): blue in the low bits; 16-bit is 5-5-5 */
+        memset(pf, 0, sizeof(pf));
+        if (b->bpp == 16) { wr32(pf + 16, 0x7c00); wr32(pf + 20, 0x03e0); wr32(pf + 24, 0x001f); }
+        else { wr32(pf + 16, 0xff0000); wr32(pf + 20, 0x00ff00); wr32(pf + 24, 0x0000ff); }
+        t->fg = pixel_of(pf, d->text_color);
+        t->bg = pixel_of(pf, d->bk_color);
+        for (int i = 0; i < 3; i++)
+        {
+            t->mask[i] = rd32(pf + 16 + 4 * i);
+            t->fg_rgb[i] = (uint8_t)(d->text_color >> (8 * i));
+        }
+        t->has_key = 0;
+        t->clip_x0 = 0;
+        t->clip_y0 = 0;
+        t->clip_x1 = t->width;
+        t->clip_y1 = t->height;
+        return 1;
+    }
     if (d->surface == NULL) return 0;
     if (DDraw_SurfaceInfo4(d->surface, &t->pixels, &t->pitch, &t->width, &t->height, NULL, NULL, NULL, pf) != 0) return 0;
     t->bpp = (int)rd32(pf + 12);
@@ -428,20 +510,37 @@ static int open_target(gdi_dc *d, target *t)
     return 1;
 }
 
+static uint8_t *row_of(target *t, int y)
+{
+    return t->pixels + (size_t)(t->bottom_up ? (t->height - 1 - y) : y) * t->pitch;
+}
+
+static uint32_t get_px(target *t, uint8_t *p, int x)
+{
+    if (t->bpp == 16) return ((uint16_t *)p)[x];
+    if (t->bpp == 24) return p[3 * x] | (p[3 * x + 1] << 8) | (p[3 * x + 2] << 16);
+    return ((uint32_t *)p)[x];
+}
+
+static void set_px(target *t, uint8_t *p, int x, uint32_t v)
+{
+    if (t->bpp == 16) ((uint16_t *)p)[x] = (uint16_t)v;
+    else if (t->bpp == 24) { p[3 * x] = (uint8_t)v; p[3 * x + 1] = (uint8_t)(v >> 8); p[3 * x + 2] = (uint8_t)(v >> 16); }
+    else ((uint32_t *)p)[x] = v;
+}
+
 static void put(target *t, int x, int y, uint32_t v)
 {
     if (x < t->clip_x0 || y < t->clip_y0 || x >= t->clip_x1 || y >= t->clip_y1) return;
-    uint8_t *p = t->pixels + y * t->pitch;
-    if (t->bpp == 16) ((uint16_t *)p)[x] = (uint16_t)v;
-    else ((uint32_t *)p)[x] = v;
+    set_px(t, row_of(t, y), x, v);
 }
 
 /* An edge pixel: the text color over the pixel below with coverage a (1..254) */
 static void blend(target *t, int x, int y, int a)
 {
     if (x < t->clip_x0 || y < t->clip_y0 || x >= t->clip_x1 || y >= t->clip_y1) return;
-    uint8_t *p = t->pixels + y * t->pitch;
-    uint32_t old = (t->bpp == 16) ? ((uint16_t *)p)[x] : ((uint32_t *)p)[x];
+    uint8_t *p = row_of(t, y);
+    uint32_t old = get_px(t, p, x);
     int keyed = t->has_key && old >= t->key_low && old <= t->key_high;
     uint32_t v = 0;
     for (int i = 0; i < 3; i++)
@@ -454,31 +553,57 @@ static void blend(target *t, int x, int y, int a)
         uint32_t c = (t->fg_rgb[i] * (uint32_t)a + below * (uint32_t)(255 - a) + 127) / 255;
         v |= ((c * maxv + 127) / 255) << shift;
     }
-    if (t->bpp == 16) ((uint16_t *)p)[x] = (uint16_t)v;
-    else ((uint32_t *)p)[x] = v | (old & ~(t->mask[0] | t->mask[1] | t->mask[2]));
+    if (t->bpp == 32) v |= old & ~(t->mask[0] | t->mask[1] | t->mask[2]);
+    set_px(t, p, x, v);
+}
+
+typedef std::vector<glyph *> glyph_list;
+
+static glyph_list glyphs_a(gdi_font *f, const uint8_t *s, int n)
+{
+    glyph_list v;
+    for (int i = 0; i < n; i++) v.push_back(glyph_of(f, s[i]));
+    return v;
+}
+
+static glyph_list glyphs_w(gdi_font *f, const uint16_t *s, int n)
+{
+    glyph_list v;
+    for (int i = 0; i < n; i++)
+    {
+        uint16_t u;
+        memcpy(&u, s + i, 2);
+        v.push_back(glyph_of_w(f, u));
+    }
+    return v;
+}
+
+static int glyphs_width(gdi_dc *d, const glyph_list &gl)
+{
+    int w = 0;
+    for (glyph *g : gl) w += g->advance + d->extra;
+    return w;
 }
 
 static int text_width(gdi_dc *d, gdi_font *f, const uint8_t *s, int n)
 {
-    int w = 0;
-    for (int i = 0; i < n; i++) w += glyph_of(f, s[i])->advance + d->extra;
-    return w;
+    return glyphs_width(d, glyphs_a(f, s, n));
 }
 
 /* Draws one line with the cell top-left at x, y (DC coordinates) */
-static void draw_line(gdi_dc *d, gdi_font *f, target *t, int x, int y, const uint8_t *s, int n)
+static void draw_glyphs(gdi_dc *d, gdi_font *f, target *t, int x, int y, const glyph_list &gl)
 {
     x += d->org_x;
     y += d->org_y;
     if (d->bk_mode == OPAQUE)
     {
-        int w = text_width(d, f, s, n);
+        int w = glyphs_width(d, gl);
         for (int yy = y; yy < y + f->height; yy++)
             for (int xx = x; xx < x + w; xx++) put(t, xx, yy, t->bg);
     }
-    for (int i = 0; i < n; i++)
+    for (size_t i = 0; i < gl.size(); i++)
     {
-        glyph *g = glyph_of(f, s[i]);
+        glyph *g = gl[i];
         for (int gy = 0; gy < g->h; gy++)
         {
             const uint8_t *row = g->bits + gy * g->w;
@@ -530,6 +655,18 @@ EXTERN_C void *CCALL CreateFontIndirectA_c(void *lplf)
 EXTERN_C uint32_t CCALL DeleteObject_c(void *hObject)
 {
     uint32_t h = to_guest(hObject);
+    auto di = dibs.find(h);
+    if (di != dibs.end())
+    {
+        for (auto &dc : dcs)
+        {
+            if (dc.second->dib == h) dc.second->dib = 0;
+        }
+        x86_free(di->second->bits);
+        free(di->second);
+        dibs.erase(di);
+        return 1;
+    }
     auto it = fonts.find(h);
     if (it != fonts.end())
     {
@@ -547,6 +684,12 @@ EXTERN_C void *CCALL SelectObject_c(void *hdc, void *hgdiobj)
 {
     gdi_dc *d = dc_of(hdc);
     uint32_t h = to_guest(hgdiobj);
+    if (d != NULL && dibs.count(h))
+    {
+        uint32_t old = d->dib ? d->dib : STOCK_FONT + 4 * 21;   /* the stock 1x1 bitmap */
+        d->dib = h;
+        return guest_value(old);
+    }
     if (d != NULL && (font_of(h) != NULL || h == STOCK_FONT + 4 * 13 || h == STOCK_FONT + 4 * 17))
     {
         /* a font, or a stock font (SYSTEM_FONT 13, DEFAULT_GUI_FONT 17) */
@@ -714,19 +857,19 @@ EXTERN_C uint32_t GetTextExtentExPointA_c(void *hdc, const char *lpszString, int
     return 1;
 }
 
-static void text_out(gdi_dc *d, int x, int y, const uint8_t *s, int n, const int32_t *clip)
+static void text_out_g(gdi_dc *d, int x, int y, const glyph_list &gl, const char *s, int n, const int32_t *clip)
 {
     gdi_font *f = selected_font(d);
     target t;
-    int w = text_width(d, f, s, n);
+    int w = glyphs_width(d, gl);
     if (d->align & TA_UPDATECP) { x = d->cur_x; y = d->cur_y; }
     if ((d->align & TA_CENTER) == TA_CENTER) x -= w / 2;
     else if (d->align & TA_RIGHT) x -= w;
     if ((d->align & TA_BASELINE) == TA_BASELINE) y -= f->ascent;
     else if (d->align & TA_BOTTOM) y -= f->height;
     if (d->align & TA_UPDATECP) d->cur_x += w;
-    if (trace()) fprintf(stderr, "GDI: text at %d,%d \"%.*s\" color 0x%06x%s%s\n", x, y, n, (const char *)s, d->text_color,
-                         (d->bk_mode == OPAQUE) ? " opaque" : "", d->surface ? "" : " (window DC, not drawn)");
+    if (trace()) fprintf(stderr, "GDI: text at %d,%d \"%.*s\" color 0x%06x%s%s\n", x, y, n, s ? s : "", d->text_color,
+                         (d->bk_mode == OPAQUE) ? " opaque" : "", (d->surface || d->dib) ? "" : " (window DC, not drawn)");
     if (!open_target(d, &t)) return;
     if (clip)
     {
@@ -735,7 +878,12 @@ static void text_out(gdi_dc *d, int x, int y, const uint8_t *s, int n, const int
         if (clip[2] + d->org_x < t.clip_x1) t.clip_x1 = clip[2] + d->org_x;
         if (clip[3] + d->org_y < t.clip_y1) t.clip_y1 = clip[3] + d->org_y;
     }
-    draw_line(d, f, &t, x, y, s, n);
+    draw_glyphs(d, f, &t, x, y, gl);
+}
+
+static void text_out(gdi_dc *d, int x, int y, const uint8_t *s, int n, const int32_t *clip)
+{
+    text_out_g(d, x, y, glyphs_a(selected_font(d), s, n), (const char *)s, n, clip);
 }
 
 EXTERN_C uint32_t CCALL TextOutA_c(void *hdc, int32_t nXStart, int32_t nYStart, const char *lpString, int32_t cbString)
@@ -867,4 +1015,93 @@ EXTERN_C uint32_t DrawTextA_c(void *hdc, const char *lpchText, int32_t cchText, 
     d->align = align;
     free(text);
     return (uint32_t)total;
+}
+
+/* ------------------------------------------------------------ memory DCs, DIB sections */
+
+EXTERN_C void *CCALL CreateCompatibleDC_c(void *hdc)
+{
+    gdi_dc *d = (gdi_dc *)calloc(1, sizeof(gdi_dc));
+    d->memory = 1;
+    d->bk_mode = OPAQUE;
+    d->bk_color = 0xffffff;
+    uint32_t h = next_dc;
+    while (dcs.count(h)) h = (h >= DC_LAST) ? DC_FIRST : h + 4;
+    next_dc = (h >= DC_LAST) ? DC_FIRST : h + 4;
+    dcs[h] = d;
+    return guest_value(h);
+}
+
+EXTERN_C uint32_t CCALL DeleteDC_c(void *hdc)
+{
+    auto it = dcs.find(to_guest(hdc));
+    if (it != dcs.end() && it->second->memory)
+    {
+        free(it->second);
+        dcs.erase(it);
+    }
+    return 1;
+}
+
+/* BITMAPINFOHEADER: biSize, biWidth, biHeight, biPlanes (16), biBitCount (16), biCompression, ... */
+EXTERN_C void *CreateDIBSection_c(void *hdc, void *pbmi, uint32_t usage, void *ppvBits, void *hSection, uint32_t offset)
+{
+    const uint8_t *bi = (const uint8_t *)pbmi;
+    if (bi == NULL) return NULL;
+    int32_t w = (int32_t)rd32(bi + 4), h = (int32_t)rd32(bi + 8);
+    int bpp = bi[14] | (bi[15] << 8);
+    if (w <= 0 || h == 0 || bpp == 0) return NULL;
+    gdi_dib *b = (gdi_dib *)calloc(1, sizeof(gdi_dib));
+    b->width = w;
+    b->height = (h < 0) ? -h : h;
+    b->bottom_up = h > 0;
+    b->bpp = bpp;
+    b->pitch = ((w * bpp + 31) / 32) * 4;
+    b->bits = (uint8_t *)x86_calloc((unsigned)(b->pitch * b->height), 1);
+    uint32_t handle = next_dib;
+    while (dibs.count(handle)) handle = (handle >= DIB_LAST) ? DIB_FIRST : handle + 4;
+    next_dib = (handle >= DIB_LAST) ? DIB_FIRST : handle + 4;
+    dibs[handle] = b;
+    if (ppvBits) wr32(ppvBits, to_guest(b->bits));
+    if (trace()) fprintf(stderr, "GDI: CreateDIBSection %dx%d %d-bit%s -> 0x%x\n", w, b->height, bpp, b->bottom_up ? " bottom-up" : "", handle);
+    return guest_value(handle);
+}
+
+/* ------------------------------------------------------------ wide text */
+
+EXTERN_C uint32_t GetTextExtentPoint32W_c(void *hdc, const uint16_t *lpString, int32_t c, void *lpSize)
+{
+    gdi_dc *d = dc_of(hdc);
+    if (d == NULL || lpSize == NULL || c < 0) return 0;
+    gdi_font *f = selected_font(d);
+    wr32(lpSize, (uint32_t)(lpString ? glyphs_width(d, glyphs_w(f, lpString, c)) : 0));
+    wr32((uint8_t *)lpSize + 4, (uint32_t)f->height);
+    return 1;
+}
+
+EXTERN_C uint32_t ExtTextOutW_c(void *hdc, int32_t x, int32_t y, uint32_t options, void *lprect, const uint16_t *lpString, uint32_t c, void *lpDx)
+{
+    gdi_dc *d = dc_of(hdc);
+    int32_t rc[4];
+    if (d == NULL) return 0;
+    if (lprect) for (int i = 0; i < 4; i++) rc[i] = (int32_t)rd32((uint8_t *)lprect + 4 * i);
+    if ((options & 2) && lprect)   /* ETO_OPAQUE: fill the rectangle */
+    {
+        target t;
+        if (open_target(d, &t))
+            for (int yy = rc[1]; yy < rc[3]; yy++)
+                for (int xx = rc[0]; xx < rc[2]; xx++) put(&t, xx + d->org_x, yy + d->org_y, t.bg);
+    }
+    if (lpString && c)
+    {
+        int mode = d->bk_mode;
+        if (options & 2) d->bk_mode = TRANSPARENT;
+        char ascii[64];
+        int n = 0;
+        for (uint32_t i = 0; i < c && n < 63; i++) ascii[n++] = (lpString[i] < 0x80) ? (char)lpString[i] : '?';
+        ascii[n] = 0;
+        text_out_g(d, x, y, glyphs_w(selected_font(d), lpString, (int)c), ascii, n, ((options & 4) && lprect) ? rc : NULL);
+        d->bk_mode = mode;
+    }
+    return 1;
 }

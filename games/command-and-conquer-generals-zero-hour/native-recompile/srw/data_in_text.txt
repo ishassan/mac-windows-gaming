@@ -1,0 +1,5 @@
+# Data inside .text (see common/native-mac/tools/gen_relocs.py).
+# <start> <length>
+# DirectInput c_dfDIKeyboard object table (256 DIOBJECTDATAFORMAT entries,
+# from dinput.lib); the DIDATAFORMAT at 0x9620fc points to it.
+7d7730 0x1000

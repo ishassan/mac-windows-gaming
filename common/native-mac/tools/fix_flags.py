@@ -45,7 +45,11 @@ def main():
     ap.add_argument("--out", required=True, help="name of the SRW output file (GAME_LLASM.llasm)")
     ap.add_argument("--sci", default="instruction_flags.sci")
     ap.add_argument("--max", type=int, default=5000)
+    ap.add_argument("--strict-data-code", action="store_true",
+                    help="the same option as for gen_relocs.py (GEN_RELOCS_OPTIONS in game.conf)")
     args = ap.parse_args()
+    import gen_relocs
+    gen_relocs.STRICT_DATA_CODE = args.strict_data_code
 
     img = Image(args.exe)
     st = analyze(img, log=lambda *a: None)

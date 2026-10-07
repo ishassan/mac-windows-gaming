@@ -4,8 +4,10 @@
  */
 
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "llasm_cpu.h"
 
 /* x87 "fldpi": push pi on the FPU stack (the stack is in cpu->_st, as doubles) */
@@ -13,6 +15,81 @@ EXTERNC void CCALL x87_fldpi_void(CPU)
 {
     cpu->_st_top = (cpu->_st_top - 1) & 7;
     cpu->_st[cpu->_st_top] = 3.14159265358979323846;
+}
+
+/* x87 "fsincos": st0 = sin(x), then push cos(x) */
+EXTERNC void CCALL x87_fsincos_void(CPU)
+{
+    double x = cpu->_st[cpu->_st_top];
+    cpu->_st[cpu->_st_top] = sin(x);
+    cpu->_st_top = (cpu->_st_top - 1) & 7;
+    cpu->_st[cpu->_st_top] = cos(x);
+}
+
+/* x87 "fldl2e": push log2(e) */
+EXTERNC void CCALL x87_fldl2e_void(CPU)
+{
+    cpu->_st_top = (cpu->_st_top - 1) & 7;
+    cpu->_st[cpu->_st_top] = 1.44269504088896340736;
+}
+
+/* x87 "fcomip st0, st(i)" and "fucomip": ZF, PF, CF from the compare
+ * (unordered: all three set; OF, SF, AF cleared), then pop. */
+EXTERNC void CCALL x87_fcomip_st(CPU, int32_t num)
+{
+    double a = cpu->_st[cpu->_st_top];
+    double b = cpu->_st[(cpu->_st_top + num) & 7];
+    uint32_t f = cpu->_eflags & ~(CF | PF | AF | ZF | SF | OF);
+    if (a != a || b != b) f |= ZF | PF | CF;
+    else if (a < b) f |= CF;
+    else if (a == b) f |= ZF;
+    cpu->_eflags = f;
+    cpu->_st_top = (cpu->_st_top + 1) & 7;
+}
+
+EXTERNC void CCALL x87_fucomip_st(CPU, int32_t num)
+{
+    x87_fcomip_st(cpu, num);
+}
+
+/* "lock bts dword [addr], 0" (a spin lock of the game): returns the old bit */
+EXTERNC uint32_t CCALL x86_lock_bts0(void *addr)
+{
+    return __atomic_fetch_or((uint32_t *)addr, 1u, __ATOMIC_SEQ_CST) & 1;
+}
+
+/* "cpuid": an Intel family 6 CPU with an FPU and a time stamp counter.
+   MMX, 3DNow! and SSE are not reported, because SRW does not translate
+   those instructions. */
+EXTERNC void CCALL x86_cpuid(CPU)
+{
+    uint32_t leaf = cpu->_eax;
+    cpu->_eax = cpu->_ebx = cpu->_ecx = cpu->_edx = 0;
+    if (leaf == 0)
+    {
+        cpu->_eax = 1;
+        cpu->_ebx = 0x756e6547;    /* "Genu" */
+        cpu->_edx = 0x49656e69;    /* "ineI" */
+        cpu->_ecx = 0x6c65746e;    /* "ntel" */
+    }
+    else if (leaf == 1)
+    {
+        cpu->_eax = 0x611;         /* family 6, model 1, stepping 1 */
+        cpu->_edx = 0x11;          /* FPU, TSC */
+    }
+    else if (leaf == 0x80000000u)
+    {
+        cpu->_eax = 0x80000000u;   /* no extended functions */
+    }
+}
+
+/* "rdtsc": a 3 GHz counter from the system clock (games measure the CPU
+   speed with it against timeGetTime). */
+EXTERNC void CCALL x86_rdtsc(CPU)
+{
+    uint64_t t = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) * 3;
+    cpu->_eax = (uint32_t)t;
+    cpu->_edx = (uint32_t)(t >> 32);
 }
 
 /* Called by code that SRW could not translate (SSE2-only paths). */

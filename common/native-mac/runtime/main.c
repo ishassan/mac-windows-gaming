@@ -106,10 +106,13 @@ int main(int argc, char *argv[])
      * does not take the screen, the keyboard or the speakers from the user.
      * SDL draws into memory (its "dummy" video driver). <P>DUMP and the
      * "shot" script command still save the game's frames. */
-    const int background = (game_getenv("BACKGROUND") != NULL);
+    const char *background_mode = game_getenv("BACKGROUND");
+    const int background = (background_mode != NULL);
     if (background)
     {
-        SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy");
+        /* "offscreen": the SDL offscreen driver, which has Vulkan (headless
+           surfaces), for the Direct3D 8 games on DXVK. Other values: dummy. */
+        SDL_SetHint(SDL_HINT_VIDEODRIVER, strcmp(background_mode, "offscreen") == 0 ? "offscreen" : "dummy");
         SDL_SetHint(SDL_HINT_AUDIODRIVER, "dummy");
     }
 

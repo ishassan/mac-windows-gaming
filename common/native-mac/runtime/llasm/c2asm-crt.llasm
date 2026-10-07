@@ -20,6 +20,21 @@ proc CallFunction_c2asm global c_CallFunction_c2asm
 endp ; end procedure CallFunction_c2asm
 
 
+proc ContinueAt_c2asm global c_ContinueAt_c2asm
+
+; Called from x86_continue_at (asm-llasm.c) after a longjmp.
+; [esp + 4] = the x86 address to continue at
+; [esp      ] = return address (pushed by the C wrapper; the code at the
+;              address returns to the return address of the first call)
+
+        add esp, esp, 4
+        load tmp0, esp, 4
+        add esp, esp, 4
+        tcall tmp0
+
+endp ; end procedure ContinueAt_c2asm
+
+
 ; C runtime math functions that the game calls (see srw/llasm/external_procedures.sci)
 ; FACOS_VOID, FASIN_VOID, FLOG10_VOID and FLOOR_DOUBLE come from llasm_float.llinc.
 

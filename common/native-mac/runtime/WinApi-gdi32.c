@@ -57,10 +57,7 @@ uint32_t CCALL BitBlt_c(void *hdcDest, int32_t nXDest, int32_t nYDest, int32_t n
     return 1;
 }
 
-void * CCALL CreateCompatibleDC_c(void *hdc)
-{
-    return new_gdi_handle();
-}
+/* CreateCompatibleDC_c, DeleteDC_c: see WinApi-gdi-text.c (memory DCs) */
 
 
 void * CCALL CreatePolygonRgn_c(void *lppt, int32_t cPoints, int32_t fnPolyFillMode)
@@ -73,10 +70,6 @@ void * CCALL CreateSolidBrush_c(uint32_t crColor)
     return new_gdi_handle();
 }
 
-uint32_t CCALL DeleteDC_c(void *hdc)
-{
-    return 1;
-}
 
 
 uint32_t CCALL FillRgn_c(void *hdc, void *hrgn, void *hbr)

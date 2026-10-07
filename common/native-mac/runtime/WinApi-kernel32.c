@@ -61,6 +61,8 @@
 #endif
 
 #include <time.h>
+#include <sched.h>
+#include <chrono>
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -471,7 +473,7 @@ uint32_t CCALL CloseHandle_c(void *hObject)
     eprintf("CloseHandle: 0x%" PRIxPTR "\n", (uintptr_t) hObject);
 #endif
 
-    if (hObject == NULL)
+    if (hObject == NULL || hObject == INVALID_HANDLE32_VALUE)
     {
         Winapi_SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
@@ -997,7 +999,7 @@ uint32_t CCALL FindClose_c(void *hFindFile)
     eprintf("FindClose: 0x%" PRIxPTR "\n", (uintptr_t) hFindFile);
 #endif
 
-    if (hFindFile == NULL)
+    if (hFindFile == NULL || hFindFile == INVALID_HANDLE32_VALUE)   /* port change: INVALID_HANDLE_VALUE fails */
     {
         Winapi_SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
@@ -1305,7 +1307,7 @@ uint32_t CCALL FindNextFileA_c(void *hFindFile, void *lpFindFileData)
     eprintf("FindNextFileA: 0x%" PRIxPTR ", 0x%" PRIxPTR "\n", (uintptr_t) hFindFile, (uintptr_t) lpFindFileData);
 #endif
 
-    if (hFindFile == NULL || lpFindFileData == NULL)
+    if (hFindFile == NULL || hFindFile == INVALID_HANDLE32_VALUE || lpFindFileData == NULL)
     {
         Winapi_SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
@@ -2112,8 +2114,11 @@ extern "C" void LagTrace_SleepEnd(uint32_t ms, uint64_t t_begin);
 
 static void Sleep_real(uint32_t cMilliseconds);
 
+extern "C" void Miles_ServiceCallbacks(void);
+
 void CCALL Sleep_c(uint32_t cMilliseconds)
 {
+    Miles_ServiceCallbacks();
     uint64_t t_begin = 0;
     LagTrace_SleepBegin(cMilliseconds, &t_begin);
     Sleep_real(cMilliseconds);
@@ -2126,7 +2131,9 @@ static void Sleep_real(uint32_t cMilliseconds)
     eprintf("Sleep: %i\n", cMilliseconds);
 #endif
     // Port change: <GAME>_TRACE_TIME=1 prints a summary of Sleep calls every 1000 calls
-    if (game_getenv("TRACE_TIME"))
+    static int trace_time = -1;   /* read once: games call Sleep(0) very often */
+    if (trace_time < 0) trace_time = game_getenv("TRACE_TIME") != NULL;
+    if (trace_time)
     {
         static uint32_t calls, total, hist[8];
         calls++;
@@ -2141,6 +2148,26 @@ static void Sleep_real(uint32_t cMilliseconds)
     struct timespec _tp, rem;
     int ret;
 
+    if (cMilliseconds == 0)
+    {
+        /* Port change: Sleep(0) in a wait loop (the frame limiter of
+           Generals) spins one core. After 8 calls within 2 ms, each call
+           sleeps 0.2 ms; the game counts time in whole milliseconds. */
+        static thread_local uint64_t last_ns;
+        static thread_local int streak;
+        uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        streak = (now - last_ns < 2000000) ? streak + 1 : 0;
+        last_ns = now;
+        if (streak < 8)
+        {
+            sched_yield();
+            return;
+        }
+        _tp.tv_sec = 0;
+        _tp.tv_nsec = 200000;
+        nanosleep(&_tp, &rem);
+        return;
+    }
     _tp.tv_sec = cMilliseconds / 1000;
     _tp.tv_nsec = (cMilliseconds % 1000) * 1000000;
 

@@ -15,6 +15,7 @@ dependencies:
   - sdl2=2.32        # window, input, audio for the runtime layer
   - freetype=2.13    # GDI text: glyphs with the font hints, as on Windows
   - python-unicorn=2.1  # x86 emulator: identify C runtime functions by running them
+  - ffmpeg=8.0=lgpl*    # Bink video (libavcodec) for the Generals Zero Hour recompile
   # Command & Conquer Generals Zero Hour (our fork of the GeneralsX port, CMake build)
   - cmake=4.4
   - ninja=1.13
