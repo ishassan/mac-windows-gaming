@@ -1,0 +1,15 @@
+# Revenant: skip the intro videos, start a new game, walk in the Keep.
+# Times in ms from the start. The same file drives the native port
+# (REVENANT_SCRIPT) and the Wine version (helpers/input.exe; its "key" is Escape).
+3000 key Escape
+6000 key Escape
+9000 key Escape
+12000 key Escape
+15000 key Escape
+20000 click 432 160
+40000 click 250 330
+50000 click 150 250
+60000 click 300 300
+70000 click 200 350
+80000 click 330 250
+100000 quit

@@ -1,0 +1,10 @@
+# Commandos: skip the logos, load save slot 1 (the first mission), then play.
+# Times in ms from the start. The same file drives the native port
+# (COMMANDOS_SCRIPT) and the Wine version (helpers/cinput.exe).
+6500 key Escape
+10500 key Escape
+14500 key Escape
+16000 key Down
+17500 key Return
+20000 key Return
+100000 quit

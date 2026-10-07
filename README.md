@@ -45,6 +45,7 @@ the repository has a script that makes the change on your own copy.
 | `games/<game>/native-mac/` | Our ports: `game.conf` (names and folders), `runtime/game.h` (values for the runtime), `srw/` (recompiler settings for that exe), `macos/Info.plist`. |
 | `games/<game>/wine/` | The Wine version: `app/` (the app's launcher and `Info.plist`), `prefix.reg` (registry settings), patches, and a README with the Windows files that it needs and the setup steps. |
 | `common/wine/` | Shared parts of the Wine versions: `make-app.sh` (makes a Wine app), `patch-miles.py` (the Miles sound fix), and the notes: see [common/wine/README.md](common/wine/README.md). |
+| `benchmark/` | The speed test of Wine 8, athei and the native ports, with fixed scenes, scripts and rules: see [benchmark/README.md](benchmark/README.md). |
 | `linux-test-vm/` | A Linux VM that runs the Wine versions on an in-memory screen, so a test takes no window from the Mac: see [linux-test-vm/README.md](linux-test-vm/README.md). |
 | `build/` | Shared tools that the build makes (SRW, llasm, the M-HT/SR sources). Not tracked. |
 

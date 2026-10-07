@@ -1,0 +1,3 @@
+# Generals: no input. The 3D menu scene runs; bench.py stops the game at 275 s.
+# The native port needs a script file only for the quit (GENERALSZH_SCRIPT).
+275000 quit
