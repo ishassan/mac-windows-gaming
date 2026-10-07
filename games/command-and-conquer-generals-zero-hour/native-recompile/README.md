@@ -53,6 +53,11 @@ Saves and options go to `Native Recompile Saves/` next to `Game Data/`
 Windows version (the same exe), so saves can be copied between the two. The
 DXVK shader cache goes to the same folder.
 
+The first start (no `Options.ini` yet) takes about one minute with no
+window: the game runs its own speed test (memory copy loops timed with
+`clock`) to set the detail level. On this Mac it sets Medium; change it in
+the options menu. Later starts skip the test.
+
 ## Build
 
 From the repository root (once): `conda env create -f environment.yml`
