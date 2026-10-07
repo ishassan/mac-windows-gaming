@@ -1,6 +1,6 @@
 # Commandos: Behind Enemy Lines on Wine (reference version)
 
-The original Windows Commandos (GOG) on Homebrew Wine. It is a reference
+The original Windows Commandos (GOG) on Wine. It is a reference
 for the native port ([../native-mac](../native-mac/README.md)). The parts
 that all Wine versions share (Wine, folder layout, the Miles fix, test
 methods) are in [../../../common/wine](../../../common/wine/README.md).
@@ -56,16 +56,25 @@ DirectDraw replacement, not the Wine DirectDraw:
 - DLL override: `ddraw=native,builtin`.
 - Direct3D renderer: `gl`.
 - Result: intro and main menu in full screen (Linux test VM, 2026-10-05).
+- On the Mac, the GOG `ddraw.ini` (`fullscreen=false`) shows a window. Since
+  2026-10-07 the prefix's `ddraw.ini` has `fullscreen=true`: the picture
+  fills the screen (athei Wine, 19.9 frames per second in the mission). The
+  GOG file is kept next to it as `ddraw.ini.orig (window mode, 2026-10-07)`.
 
 ## Set up again
 
 These steps repeat the result of the prefix of 2026-10-05 (the files and
 the settings in it), not a recorded command history.
 
-1. Install Wine: `brew install --cask wine-crossover`.
+1. Install Wine: `common/wine/install-athei.sh` (the athei CrossOver 26.3
+   build, see [`common/wine`](../../../common/wine/README.md)). In the steps
+   below, `wine` is `"$HOME/Applications/Wine athei/wine/bin/wine"`, with
+   `WINEDLLOVERRIDES="mscoree,mshtml="` set. (The installed prefix was made
+   with Wine 8 and then updated by athei; a new prefix made with athei is
+   not tested yet.)
 2. Put the GOG game in `~/Games/Commandos Behind Enemy Lines/Game Data`.
 3. Make the prefix:
-   `WINEPREFIX="$HOME/Games/Commandos Behind Enemy Lines/Wine/wineprefix" wineboot -i`.
+   `WINEPREFIX="$HOME/Games/Commandos Behind Enemy Lines/Wine/wineprefix" wine wineboot -i`.
 4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/commandos-behind-enemy-lines/wine/prefix.reg`.
    It sets `ddraw=native,builtin`, the Direct3D renderer `gl`, and the Mac
    keys (Command as Ctrl, Option as Alt).

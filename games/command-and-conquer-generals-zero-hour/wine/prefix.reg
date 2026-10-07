@@ -20,3 +20,9 @@ REGEDIT4
 
 [HKEY_CURRENT_USER\Software\Wine\Mac Driver]
 "LeftCommandIsCtrl"="Y"
+; athei CrossOver 26.3: the Mac driver cannot change the display mode, so the
+; full-screen start stops with "Please make sure you have DirectX 8.1".
+; Emulated mode changes (the key name is the same for the Mac driver) fix it:
+; the game fills the screen at its own resolution (tested 2026-10-07).
+[HKEY_CURRENT_USER\Software\Wine\X11 Driver]
+"EmulateModeset"="y"

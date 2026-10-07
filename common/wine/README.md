@@ -11,9 +11,56 @@ change those files on your Mac.
 
 ## Wine
 
-- One Wine for all games: Homebrew cask `wine-crossover` 23.7.1 (Wine
-  8.0.1, CrossOver patches). Install: `brew install --cask wine-crossover`.
-  It is an Intel program, so it needs Rosetta.
+- One Wine for all games: the athei CrossOver 26.3 build (Wine 11,
+  [athei/wine-build](https://github.com/athei/wine-build) release
+  `cx-26.3.0-7`), with the
+  [x87sidecar](https://github.com/athei/x87sidecar) math helper (v1.8.0) and
+  our thread QoS fix (`qos.c`). Install all three:
+  `common/wine/install-athei.sh` (to `~/Applications/Wine athei`; pinned
+  sha256 values). It is an Intel program, so it needs Rosetta.
+- Before: Homebrew cask `wine-crossover` 23.7.1 (Wine 8.0.1). To move a
+  game's prefix to athei: make a copy of the prefix (`cp -cRp`; the update
+  cannot be undone), run
+  `WINEPREFIX=<prefix> WINEDLLOVERRIDES="mscoree,mshtml=" "$HOME/Applications/Wine athei/wine/bin/wine" wineboot -u`,
+  then make the Wine app again (`make-app.sh`) or copy the new
+  `launcher.sh` into it and sign it again.
+- Scan of the athei downloads (2026-10-07): no malicious code found. All
+  files are in `wine/`. The network code is only in the usual Wine parts.
+  The D3DMetal files have a valid Apple signature. The source changes over
+  CrossOver start x87sidecar only when `ROSETTA_X87_PATH` is set. x87sidecar
+  has no network code. Limit: the binaries were not rebuilt from source.
+- The launcher sets `ROSETTA_X87_PATH` (x87 math in native code, not in
+  Rosetta's slow x87 emulation), `DYLD_INSERT_LIBRARIES` to `qos.dylib`, and
+  `WINEDLLOVERRIDES="mscoree,mshtml="` (the build has no Mono and no Gecko;
+  without this, the first start waits for an install prompt that does not
+  show).
+- `qos.c`: the athei build makes its threads with the default macOS QoS
+  class, so a timed `Sleep()` ends 6 to 8 ms late. Commandos limits its frame
+  rate with `Sleep()` and dropped to 17.8 frames per second. With the QoS
+  class "user interactive" (as the Wine 8 build sets it), it gets 19.5.
+- athei uses the Windows user name `crossover` (Wine 8 uses the Mac user
+  name), so My Documents is `drive_c/users/crossover/Documents`. A new or
+  updated prefix links it to the Mac Documents folder. The launchers set up
+  both user folders, so both Wines use the saves in the game folder. (Before
+  this fix, Generals on athei read and wrote `Options.ini` in
+  `~/Documents`, at Low detail.)
+- Measured 2026-10-07 in full screen, on prefix copies with the same game
+  settings for both Wines (game process cores, median frames per second;
+  two runs each; Wine 8 / athei + x87sidecar + qos.dylib):
+
+  | Game and scene | Wine 8 | athei |
+  |---|---|---|
+  | Commandos, mission | 0.25-0.28, 19.5-19.8 | 0.20-0.22, 19.5-19.8 |
+  | Revenant, Keep scene (`Software3D=Yes`) | 0.42, 24.4 | 0.26, 24.4 |
+  | Generals, menu scene, High, 1280x800, full screen | 2.19-2.20, 24.0-24.2 | 1.43, 31.2 |
+  | Generals, the same in a window (`-win`) | 2.20, 23.0-23.6 | 1.46, 31.2 |
+
+  No start failed. On athei, full screen in Generals uses emulated display
+  modes (`EmulateModeset`, see the Generals `prefix.reg`); the window and
+  full-screen values show that this costs no speed. An earlier Generals
+  value for athei (1.21 cores) came from Low detail (the My Documents
+  problem above) and is not valid. Generals on athei draws the ground
+  correctly (Wine Stable 11.0 drew it white).
 - To compare with the native port without a window on the Mac, use the
   Linux test VM ([../../linux-test-vm](../../linux-test-vm/README.md)). It runs
   the same Wine apps' scripts with Linux Wine 11.
@@ -41,8 +88,10 @@ common/wine/patch-wow64cpu.py
 
 ## Wine 8 and Wine 11 compared (2026-10-06)
 
-Keep Wine 8 (`wine-crossover` 23.7.1). Wine 11 is not better for these
-three games:
+This comparison is from before the move to athei. It compares Wine 8
+(`wine-crossover` 23.7.1) with plain WineHQ Wine 11 (Gcenx `wine-stable`),
+not with the athei CrossOver 26.3 build. Result then: plain Wine 11 was not
+better for these three games:
 
 - Revenant: as good as Wine 8 with the game's own software 3D (the setting
   that the Wine app uses). With Direct3D figures it uses about 25% more CPU.

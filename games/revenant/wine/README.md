@@ -1,6 +1,6 @@
 # Revenant on Wine (reference version)
 
-The original Windows Revenant (GOG, version 1.22) on Homebrew Wine. It is a
+The original Windows Revenant (GOG, version 1.22) on Wine. It is a
 reference for the native port ([../native-mac](../native-mac/README.md)).
 The parts that all Wine versions share (Wine, folder layout, the Miles fix,
 test methods) are in [../../../common/wine](../../../common/wine/README.md).
@@ -53,11 +53,16 @@ These are the steps for a new prefix. The prefix of 2026-03 was made in
 earlier sessions, so this list repeats its result (the files and the
 settings in it), not a recorded command history.
 
-1. Install Wine: `brew install --cask wine-crossover`.
+1. Install Wine: `common/wine/install-athei.sh` (the athei CrossOver 26.3
+   build, see [`common/wine`](../../../common/wine/README.md)). In the steps
+   below, `wine` is `"$HOME/Applications/Wine athei/wine/bin/wine"`, with
+   `WINEDLLOVERRIDES="mscoree,mshtml="` set. (The installed prefix was made
+   with Wine 8 and then updated by athei; a new prefix made with athei is
+   not tested yet.)
 2. Put the GOG game in `~/Games/Revenant/Game Data` (the files that the
    native port also needs).
 3. Make the prefix:
-   `WINEPREFIX="$HOME/Games/Revenant/Wine/wineprefix_cx" wineboot -i`.
+   `WINEPREFIX="$HOME/Games/Revenant/Wine/wineprefix_cx" wine wineboot -i`.
 4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/revenant/wine/prefix.reg`.
    It sets `ddraw=builtin` (the Wine DirectDraw, not a replacement
    `ddraw.dll`), the Mac driver value `ForceOpenGLBackingStore=y`, and

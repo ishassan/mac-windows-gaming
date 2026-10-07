@@ -1,6 +1,6 @@
 # Command & Conquer Generals Zero Hour on Wine (reference version)
 
-The original Windows Zero Hour (the EA app / Origin copy) on Homebrew Wine.
+The original Windows Zero Hour (the EA app / Origin copy) on Wine.
 It is a reference for the native app ([../native-mac](../native-mac/README.md)).
 The parts that all Wine versions share (Wine, folder layout, test methods)
 are in [../../../common/wine](../../../common/wine/README.md).
@@ -78,18 +78,25 @@ folders, except where noted.
 These steps repeat the result of the prefix of 2026-10-05 (the files and
 the settings in it), not a recorded command history.
 
-1. Install Wine: `brew install --cask wine-crossover`. For the map editor
-   also `brew install winetricks`.
+1. Install Wine: `common/wine/install-athei.sh` (the athei CrossOver 26.3
+   build, see [`common/wine`](../../../common/wine/README.md)). In the steps
+   below, `wine` is `"$HOME/Applications/Wine athei/wine/bin/wine"`, with
+   `WINEDLLOVERRIDES="mscoree,mshtml="` set. (The installed prefix was made
+   with Wine 8 and then updated by athei; a new prefix made with athei is
+   not tested yet.) For the map editor also
+   `brew install winetricks`.
 2. Put the `.big` files of the base game and Zero Hour in the two
    `Game Data` folders (the native app needs them too).
 3. Make the prefix:
-   `WINEPREFIX="$HOME/Games/Command and Conquer Generals Zero Hour/Wine/wineprefix" wineboot -i`.
+   `WINEPREFIX="$HOME/Games/Command and Conquer Generals Zero Hour/Wine/wineprefix" wine wineboot -i`.
 4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/command-and-conquer-generals-zero-hour/wine/prefix.reg`.
    It sets the two EA Games keys above, the Direct3D renderer `gl` and
    `LeftCommandIsCtrl`.
 5. Make the two Wine game folders under `<prefix>/drive_c/EA Games` and copy
    the Wine-only files above from the install into them.
-6. For the map editor: `winetricks mfc42` (with the same `WINEPREFIX`).
+6. For the map editor: `winetricks mfc42` (with the same `WINEPREFIX`, and
+   `WINE` set to the athei `wine`; done with Wine 8 on 2026-10-05, not
+   tested with athei).
 7. Make the app:
    `common/wine/make-app.sh games/command-and-conquer-generals-zero-hour/wine/app "$HOME/Games/Command and Conquer Generals Zero Hour/Wine" "<Zero Hour Wine game folder>/GeneralsZH.ico"`.
 8. Start the app. It sets the My Documents link and adds the links to
@@ -108,5 +115,5 @@ icon was made in another way that was not recorded.
 | Linux test VM, 2026-10-05 | 3D shell map behind the main menu. |
 | `WorldBuilder.exe` in the Linux test VM, 2026-10-05 | Starts (MFC42 works). After EA's license dialog (accepted in the VM copy), the editor opens with the 3D terrain view and its tool windows. On the Mac the dialog still comes up once. |
 | Mac, speed, 2026-10-06 | Menu scene at 1280x800, CPU cores and median frames per second: native 0.46 cores (about 70 fps); Wine 8 2.22 cores, 21.8 fps; Wine 8 with `csmt=0` 1.18 cores, 22.6 fps; Wine 11 1.76 cores, 15.5 fps; Wine 11 with `csmt=0` 1.20 cores, 15.2 fps. Test copy of the prefix only; the real prefix keeps the default. |
-| Mac, Wine 11 (patched Wine Stable), 2026-10-06 | The ground draws white like snow, with `csmt` on and off. Keep Wine 8 for this game. Cause: in the Wine 11 Direct3D code (a texture stage has no texture when the ground is drawn); the game makes and fills the ground texture the same way on both Wines. In the Linux test VM (Wine 11.16, Mesa OpenGL) the ground is correct, so the bug shows only on the Mac. Wine 11.16 on the Mac also draws it white, so the cause is the Mac side (Apple's OpenGL or the Mac display driver of Wine), not the Wine version. See "Wine 8 and Wine 11 compared" in `common/wine/README.md`. |
+| Mac, Wine 11 (patched Wine Stable), 2026-10-06 | The ground draws white like snow, with `csmt` on and off. Do not use plain Wine 11 for this game (the athei build draws the ground correctly). Cause: in the Wine 11 Direct3D code (a texture stage has no texture when the ground is drawn); the game makes and fills the ground texture the same way on both Wines. In the Linux test VM (Wine 11.16, Mesa OpenGL) the ground is correct, so the bug shows only on the Mac. Wine 11.16 on the Mac also draws it white, so the cause is the Mac side (Apple's OpenGL or the Mac display driver of Wine), not the Wine version. See "Wine 8 and Wine 11 compared" in `common/wine/README.md`. |
 | Mac, saves, 2026-10-06 | The Windows save "GLA 5" loads ($6900); the native app with the save fix loads the same save with the same state. |
