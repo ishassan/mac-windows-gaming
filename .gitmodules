@@ -1,3 +1,3 @@
 [submodule "command-and-conquer-generals-zero-hour/native-mac/GeneralsX"]
-	path = games/command-and-conquer-generals-zero-hour/native-mac/GeneralsX
+	path = games/command-and-conquer-generals-zero-hour/open-source-port/GeneralsX
 	url = https://github.com/ishassan/GeneralsX.git

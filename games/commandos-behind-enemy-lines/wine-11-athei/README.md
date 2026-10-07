@@ -1,7 +1,9 @@
 # Commandos: Behind Enemy Lines on Wine (reference version)
 
 The original Windows Commandos (GOG) on Wine. It is a reference
-for the native port ([../native-mac](../native-mac/README.md)). The parts
+for the native port ([../native-mac](../native-mac/README.md)). This folder
+is for the athei Wine (the default); [../wine-8](../wine-8/README.md) is the
+same setup on Wine 8. The parts
 that all Wine versions share (Wine, folder layout, the Miles fix, test
 methods) are in [../../../common/wine](../../../common/wine/README.md).
 
@@ -9,26 +11,31 @@ methods) are in [../../../common/wine](../../../common/wine/README.md).
 
 | File | What it is |
 |---|---|
-| `app/Info.plist`, `app/launcher.sh` | The Wine app (`common/wine/make-app.sh`). |
+| `app/Info.plist`, `app/launcher.sh` | The Wine app (`common/wine/make-app.sh`). The launcher is the same for both Wine versions: the name of the version folder picks the Wine. |
 | `prefix.reg` | The registry settings of the prefix. Import: `wine regedit /S prefix.reg` (with `WINEPREFIX`). |
 
 ## Layout on the Mac
 
 ```
 ~/Games/Commandos Behind Enemy Lines/
-  Commandos Behind Enemy Lines (Native).app
-  Game Data/                     the GOG game; saves in User/Pyro Studios/Commandos/OUTPUT
-  Wine/
-    Commandos Behind Enemy Lines (Wine).app
-    wineprefix/                  the Wine prefix
-      drive_c/GOG Games/Commandos/   the Wine-only files and a link to each Game Data item
-    wine-launcher.log
+├── Original Game Files              the GOG game
+├── Saves                            saves and game options (shared by all versions)
+├── native-mac
+├── wine-11-athei
+│   ├── Commandos Behind Enemy Lines (Wine).app
+│   ├── Settings/ddraw.ini           cnc-ddraw settings of this version
+│   ├── wineprefix                   the Wine prefix
+│   │   └── drive_c/GOG Games/Commandos   the Wine-only files and a link to each Original Game Files item
+│   └── wine-launcher.log
+└── wine-8                           the same for Wine 8
 ```
 
-Saves: the game keeps them in `My Documents\Pyro Studios`. In the prefix,
-My Documents (`drive_c/users/<user>/Documents`) is a link to
-`Game Data/User`, the folder that the native app uses. So both versions use
-the same saves. The launcher makes this link before each start.
+Saves: the game keeps its saves and its game options (`COMANDO.CFG`,
+`USER.CFG`) in `My Documents\Pyro Studios\Commandos\OUTPUT`. In the
+prefix, that folder (`drive_c/users/<user>/Documents/Pyro Studios/Commandos/OUTPUT`)
+is a link to `Saves`, the folder that the native app also uses. So all
+versions use the same saves. `ddraw.ini` in the Wine game folder is a link
+to `Settings/ddraw.ini`. The launcher makes these links before each start.
 
 ## Wine-only files (in `C:\GOG Games\Commandos`)
 
@@ -37,7 +44,7 @@ All except `ddraw.ini` come from the GOG install.
 | File | What it does |
 |---|---|
 | `MSS32.DLL` | Miles sound, patched with `common/wine/patch-miles.py`. The original is `MSS32.DLL.orig`. |
-| `ddraw.ini` | Settings of cnc-ddraw (see below). Keep it with the cnc-ddraw `ddraw.dll`. |
+| `ddraw.ini` | A link to `Settings/ddraw.ini` of the version: the settings of cnc-ddraw (see below). |
 | `mpserver.exe`, `directplay.cmd` | Multiplayer server and DirectPlay setup. |
 | `MSS16.DLL`, `mssb16.tsk` | Miles parts for Windows 95/98. |
 
@@ -59,7 +66,8 @@ DirectDraw replacement, not the Wine DirectDraw:
 - On the Mac, the GOG `ddraw.ini` (`fullscreen=false`) shows a window. Since
   2026-10-07 the prefix's `ddraw.ini` has `fullscreen=true`: the picture
   fills the screen (athei Wine, 19.9 frames per second in the mission). The
-  GOG file is kept next to it as `ddraw.ini.orig (window mode, 2026-10-07)`.
+  GOG file is kept next to it in `Settings` as `ddraw.ini.orig (window mode,
+  2026-10-07)`.
 
 ## Set up again
 
@@ -72,21 +80,22 @@ the settings in it), not a recorded command history.
    `WINEDLLOVERRIDES="mscoree,mshtml="` set. (The installed prefix was made
    with Wine 8 and then updated by athei; a new prefix made with athei is
    not tested yet.)
-2. Put the GOG game in `~/Games/Commandos Behind Enemy Lines/Game Data`.
+2. Put the GOG game in `~/Games/Commandos Behind Enemy Lines/Original Game Files`.
 3. Make the prefix:
-   `WINEPREFIX="$HOME/Games/Commandos Behind Enemy Lines/Wine/wineprefix" wine wineboot -i`.
-4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/commandos-behind-enemy-lines/wine/prefix.reg`.
+   `WINEPREFIX="$HOME/Games/Commandos Behind Enemy Lines/wine-11-athei/wineprefix" wine wineboot -i`.
+4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/commandos-behind-enemy-lines/wine-11-athei/prefix.reg`.
    It sets `ddraw=native,builtin`, the Direct3D renderer `gl`, and the Mac
    keys (Command as Ctrl, Option as Alt).
 5. Put cnc-ddraw's `ddraw.dll` into `<prefix>/drive_c/windows/syswow64`.
 6. Make `<prefix>/drive_c/GOG Games/Commandos` and copy the Wine-only files
-   above from the GOG install into it.
+   above from the GOG install into it, except `ddraw.ini`: put that one in
+   `wine-11-athei/Settings/` (and set `fullscreen=true` in it).
 7. Patch Miles:
    `common/wine/patch-miles.py "<prefix>/drive_c/GOG Games/Commandos/MSS32.DLL"`.
 8. Make the app:
-   `common/wine/make-app.sh games/commandos-behind-enemy-lines/wine/app "$HOME/Games/Commandos Behind Enemy Lines/Wine" "$HOME/Games/Commandos Behind Enemy Lines/Game Data/goggame-1207662193.ico"`.
+   `common/wine/make-app.sh games/commandos-behind-enemy-lines/wine-11-athei/app "$HOME/Games/Commandos Behind Enemy Lines/wine-11-athei" "$HOME/Games/Commandos Behind Enemy Lines/Original Game Files/goggame-1207662193.ico"`.
 9. Start the app. Start it before any other Wine program in this prefix:
-   it sets the My Documents link first, else the game writes its saves
+   it sets the save folder link first, else the game writes its saves
    into the Mac Documents folder (this happened once, on 2026-10-05).
 
 Check (2026-10-05): in a new prefix in the Linux test VM, `prefix.reg`

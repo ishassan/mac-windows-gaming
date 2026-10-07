@@ -27,6 +27,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 W = os.environ.get("BENCH_WORK", os.path.expanduser("~/Library/Caches/mac-windows-gaming-bench"))
 G = os.path.expanduser("~/Games")
+NAMES = {"cmd": "Commandos Behind Enemy Lines", "rev": "Revenant", "gen": "Command and Conquer Generals Zero Hour"}
 ATHEI = os.path.expanduser("~/Applications/Wine athei")
 game, wine, mode, rnd = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 tag = f"{game}-{wine}-{mode}"
@@ -36,21 +37,20 @@ END = {"gen": 275}.get(game)
 
 if wine == "native":
     exe, prefix_env = {
-        "cmd": (f"{G}/Commandos Behind Enemy Lines/Commandos Behind Enemy Lines (Native).app/Contents/MacOS/Commandos", "COMMANDOS"),
-        "rev": (f"{G}/Revenant/Revenant (Native).app/Contents/MacOS/Revenant", "REVENANT"),
-        "gen": (f"{G}/Command and Conquer Generals Zero Hour/Command & Conquer Generals Zero Hour (Native).app/Contents/MacOS/GeneralsZH", "GENERALSZH"),
+        "cmd": (f"{G}/{NAMES['cmd']}/native-mac/Commandos Behind Enemy Lines (Native).app/Contents/MacOS/Commandos", "COMMANDOS"),
+        "rev": (f"{G}/{NAMES['rev']}/native-mac/Revenant (Native).app/Contents/MacOS/Revenant", "REVENANT"),
+        "gen": (f"{G}/{NAMES['gen']}/native-mac/Command & Conquer Generals Zero Hour (Native).app/Contents/MacOS/GeneralsZH", "GENERALSZH"),
     }[game]
-    data = {"cmd": f"{W}/data/cmd-Game Data", "rev": f"{W}/data/rev-Game Data",
-            "gen": f"{W}/data/gen/Game Data/Command and Conquer Generals Zero Hour"}[game]
+    # The data folder of the copy; the port finds its Settings and the Saves
+    # next to it (GAME_PATH_REDIRECTS in its game.h).
+    data = f"{W}/{NAMES[game]}/Original Game Files" + ("/Command and Conquer Generals Zero Hour" if game == "gen" else "")
     script = f"{HERE}/scripts/" + {"cmd": "commandos.txt", "rev": "revenant.txt", "gen": "generals.txt"}[game]
     env = dict(os.environ, **{f"{prefix_env}_DATA": data, f"{prefix_env}_SCRIPT": script, f"{prefix_env}_TRACE_LAG": "1"})
-    if game == "gen":
-        env["GENERALSZH_DOCUMENTS"] = f"{W}/data/gen/native-docs"
     argv, cwd, proc = [exe], "/", "MacOS/" + os.path.basename(exe)
     kill = lambda: None
 else:
     wb = "/opt/homebrew/bin" if wine == "w8" else f"{ATHEI}/wine/bin"
-    pfx = f"{W}/pfx-{game}-{wine}"
+    pfx = f"{W}/{NAMES[game]}/{'wine-8' if wine == 'w8' else 'wine-11-athei'}/wineprefix"
     env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG="fps", MVK_CONFIG_LOG_LEVEL="0", WINEDLLOVERRIDES="mscoree,mshtml=")
     if wine == "athei":
         env.update(ROSETTA_X87_PATH=f"{ATHEI}/x87sidecar", DYLD_INSERT_LIBRARIES=f"{ATHEI}/qos.dylib")

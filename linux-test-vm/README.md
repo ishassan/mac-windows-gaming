@@ -37,7 +37,7 @@ window.
 linux-test-vm/vm.sh create      # once: make the VM (see "Make the VM")
 linux-test-vm/vm.sh start       # start the VM and the screen :99
 KEYS=/opt/games-vm/keys/revenant-menu.txt \
-  linux-test-vm/vm.sh test revenant 50 "$HOME/Games/Revenant/Wine/Revenant (Wine).app/Contents/MacOS/Revenant"
+  linux-test-vm/vm.sh test revenant 50 "$HOME/Games/Revenant/wine-11-athei/Revenant (Wine).app/Contents/MacOS/Revenant"
 linux-test-vm/vm.sh shots revenant
 linux-test-vm/vm.sh stop
 ```

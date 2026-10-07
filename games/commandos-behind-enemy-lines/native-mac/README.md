@@ -48,7 +48,8 @@ Known issues:
 ## Play
 
 1. Install the GOG game data. The default folder is
-   `~/Games/Commandos Behind Enemy Lines/Game Data` (the folder with `WARGAME.DIR`).
+   `~/Games/Commandos Behind Enemy Lines/Original Game Files` (the folder with
+   `WARGAME.DIR`; layout: the top README).
    Another folder: set `COMMANDOS_DATA`, or give the folder as the first argument.
 2. Build the program and the app bundle (see below), then open
    `Commandos Behind Enemy Lines (Native).app`.
@@ -56,9 +57,13 @@ Known issues:
 The game starts in full screen at the size of your screen (the 640x480
 picture is scaled, with its shape kept). Cmd+Return or Alt+Return switches
 between full screen and a window. To start in a window, put
-`Display_Mode=window` in `Commandos.cfg` in the game folder.
+`Display_Mode=window` in `native-mac/Settings/Commandos.cfg` of the game folder.
 
-Saves go to `User/Pyro Studios/Commandos/OUTPUT/` in the game folder.
+Saves go to `Saves/` of the game folder, next to `Original Game Files` (the
+game writes them to `My Documents\Pyro Studios\Commandos\OUTPUT`, together
+with its game options `COMANDO.CFG` and `USER.CFG`). The Wine versions use
+the same folder. The rest of My Documents goes to `native-mac/Settings/Documents`.
+These paths are `GAME_PATH_REDIRECTS` in `runtime/game.h`.
 
 ## Build
 

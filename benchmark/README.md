@@ -3,22 +3,25 @@
 These scripts measure the speed of the three games in a fixed way, so that
 results of different days can be compared. They compare:
 
-- `w8`: Wine 8 (Homebrew `wine-crossover` 23.7.1) with the prefix copy
-  `<prefix> (Wine 8)`.
+- `w8`: Wine 8 (Homebrew `wine-crossover` 23.7.1) with the `wine-8` prefix
+  of the game.
 - `athei`: the athei CrossOver 26.3 Wine with x87sidecar and `qos.dylib`
   (the default Wine, see [`common/wine`](../common/wine/README.md)), with the
-  live prefix.
-- `native`: our native ports (the installed `(Native).app` of each game).
+  `wine-11-athei` prefix.
+- `native`: our native ports (the installed `native-mac/<Game> (Native).app`
+  of each game). The GeneralsX app is not part of the benchmark.
 
 ## Rules
 
-- A run never writes into `~/Games`. `setup.sh` makes APFS copies of the
-  game data and of the prefixes in a work folder (default
+- A run never writes into `~/Games`. `setup.sh` makes an APFS copy of each
+  game folder (the layout of the top README) in a work folder (default
   `~/Library/Caches/mac-windows-gaming-bench`), and `relink.py` points every
-  link of the prefix copies at the data copies. It stops if a link into
-  `~/Games` is left.
-- All versions of a game use the same game settings: Generals reads the
-  `Old Windows Saves` options (High, 1280x800) on every version. (On
+  link of the copies at the copies. It stops if a link into `~/Games` is
+  left.
+- All versions of a game use the same game settings: `setup.sh` copies the
+  `wine-11-athei` settings into the other versions of the copy (Generals:
+  `Options.ini`, High, 1280x800; Revenant: `revenant.ini` with
+  `Windowed=No`; Commandos: `ddraw.ini`). (On
   2026-10-07 an earlier test let athei read other options at Low detail; its
   Generals result was not valid.)
 - The same input script drives the native port and the Wine version

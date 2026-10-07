@@ -92,8 +92,18 @@ window and full screen (at the desktop size). The start mode is
 `GAME_DISPLAY_MODE` in the game's `game.h` (0 window, the default; 1 full
 screen at the desktop size; 2 full screen with a display mode change). The
 player can change it with `Display_Mode=window`, `desktop` or `fullscreen`
-in the game's config file (`GAME_CONFIG_FILE` in `game.h`, in the game
-folder), which `runtime/Game-Config.c` reads.
+in the game's config file (`GAME_CONFIG_FILE` in `game.h`, a path relative
+to the game folder: `native-mac/Settings/` of the layout in the top README),
+which `runtime/Game-Config.c` reads.
+
+**Path redirects.** `GAME_PATH_REDIRECTS` in a game's `game.h` lists pairs
+of a path that the game opens and the real path, both relative to the game
+folder, with `/`. `CLIB_FindFile` (`CLIB.c`), which every file function
+uses, changes the first match (no case, whole path parts). This keeps the
+original game files as they are: Revenant writes `revenant.ini`, `Curmap`
+and `Save` into its own folder, and the port sends them to
+`../native-mac/Settings` and `../Saves`. Commandos and Generals send the
+save folder in My Documents to the shared `Saves` the same way.
 
 **INI overrides.** `GAME_INI_OVERRIDES` in a game's `game.h` lists INI
 values (section, key, value) that `GetPrivateProfileStringA` gives in place

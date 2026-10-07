@@ -1,15 +1,19 @@
 #!/bin/bash
-# Make the Wine app of a game ("<Game> (Wine).app") from the files in its
-# repository folder <game>/wine/app:
+# Make the Wine app of a game ("<Game> (Wine).app" or "<Game> (Wine 8).app")
+# from the files in its repository folder <game>/<version>/app (version:
+# wine-11-athei or wine-8):
 #   Info.plist   the app name (CFBundleDisplayName), program name
 #                (CFBundleExecutable) and icon name (CFBundleIconFile)
-#   launcher.sh  the program: it sets WINEPREFIX, the Wine user folders and
-#                the links to Game Data, and starts the game
+#   launcher.sh  the program: it picks the Wine from the name of the version
+#                folder, sets WINEPREFIX, the Wine user folders and the links
+#                to Original Game Files, Saves and Settings, and starts the
+#                game (wine-8/app/launcher.sh is a link to the wine-11-athei one)
 #
-# Usage: common/wine/make-app.sh <game>/wine/app <output folder> [icon file]
-#   output folder  the game's Wine folder, for example
-#                  "$HOME/Games/Revenant/Wine". The launcher finds the Wine
-#                  prefix next to the app and the game in ../Game Data.
+# Usage: common/wine/make-app.sh <game>/<version>/app <output folder> [icon file]
+#   output folder  the version folder of the game, for example
+#                  "$HOME/Games/Revenant/wine-11-athei". The launcher finds
+#                  the Wine prefix and Settings next to the app, and the game
+#                  in ../Original Game Files (layout: ~/Games/README.md).
 #   icon file      .icns, or an image that sips can read (.ico, .png). The
 #                  game's README tells which file to use. Without it, the app
 #                  has no icon.

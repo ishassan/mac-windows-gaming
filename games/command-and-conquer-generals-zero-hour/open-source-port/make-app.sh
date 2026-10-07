@@ -4,7 +4,7 @@
 # The result is "build/Command & Conquer Generals Zero Hour.app" in this folder.
 # This script does not install the app. See README.md for the install steps.
 #
-# Usage: games/command-and-conquer-generals-zero-hour/native-mac/make-app.sh
+# Usage: games/command-and-conquer-generals-zero-hour/open-source-port/make-app.sh
 # Needs: the conda env of the repository (environment.yml), git, Xcode command line tools.
 set -euo pipefail
 
@@ -59,24 +59,17 @@ mv "$C/Resources/generalsx-zh_icon.png" "$C/Resources/$GAME.png"
 rm "$C/MacOS/GeneralsXZH"
 ln -s run.sh "$C/MacOS/$GAME"
 
-# Step 4: run.sh finds the game files in "Game Data" next to the app, and starts the renamed binary.
-python3 - "$C/MacOS/run.sh" "$GAME" <<'EOF'
+# Step 4: run.sh finds the game files in "Original Game Files" of the game folder, keeps the DXVK
+# cache and log in the Settings folder next to the app, and starts the renamed binary.
+python3 - "$C/MacOS/run.sh" "$GAME" "$HERE/run-local.sh" <<'EOF'
 import re, sys
 path, game = sys.argv[1], sys.argv[2]
+LOCAL_BLOCK = open(sys.argv[3]).read()
 text = open(path).read()
 block = re.compile(
     r'# GeneralsX @bugfix BenderAI 01/04/2026 Select default Zero Hour asset path.*?\n'
     r'(?=\n# Backward compatibility for existing runtime readers)', re.S)
-local = '''# LOCAL CHANGE (see README.md in the game folder): game files are in the
-# "Game Data" folder next to this app, not in ~/GeneralsX.
-GAME_DIR="$(cd "${CONTENTS_DIR}/../.." && pwd)"
-if [[ -z "${CNC_GENERALS_PATH:-}" ]]; then
-    export CNC_GENERALS_PATH="${GAME_DIR}/Game Data/Command and Conquer Generals"
-fi
-if [[ -z "${CNC_GENERALS_ZH_PATH:-}" ]]; then
-    export CNC_GENERALS_ZH_PATH="${GAME_DIR}/Game Data/Command and Conquer Generals Zero Hour"
-fi
-'''
+local = LOCAL_BLOCK
 text, count = block.subn(lambda m: local, text)
 if count != 1:
     sys.exit("run.sh: the asset path block was not found; compare run.sh with README.md step 4")
@@ -84,6 +77,19 @@ old = '"${BIN_DIR}/GeneralsXZH"'
 if text.count(old) != 1:
     sys.exit("run.sh: the binary line was not found")
 text = text.replace(old, '"${BIN_DIR}/%s"' % game)
+open(path, 'w').write(text)
+EOF
+
+# Step 5: the font cache goes to the Settings folder (through the GeneralsX link in
+# ~/Library/Application Support), not to a "var" folder in the game folder.
+python3 - "$C/Resources/fontconfig/fonts.conf" <<'EOF'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+old = '<cachedir>./../../var/cache/fontconfig</cachedir>'
+if text.count(old) != 1:
+    sys.exit("fonts.conf: the cache folder line was not found; compare it with README.md step 5")
+text = text.replace(old, '<cachedir>~/Library/Application Support/GeneralsX/fontconfig-cache</cachedir>')
 open(path, 'w').write(text)
 EOF
 

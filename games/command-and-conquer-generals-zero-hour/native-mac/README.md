@@ -1,232 +1,139 @@
-# Command & Conquer Generals Zero Hour (native Apple Silicon)
+# Command & Conquer Generals Zero Hour: native port (recompile)
 
-Zero Hour runs natively on Apple Silicon with a community port that is
-built on the source code that EA released. It is not our port: this folder
-holds only the notes to install and update it, and the local changes that
-we make to it. It needs no Wine, no Rosetta, and no Origin. For the Windows
-version on Wine (the reference), see [../wine](../wine/README.md).
+A native arm64 macOS build of Zero Hour made the same way as our Commandos
+and Revenant ports: the game's own x86 program (`game.dat`, patch 1.04) is
+statically recompiled to arm64 with [M-HT/SR](https://github.com/M-HT/SR),
+and the shared native layer in
+[`../../../common/native-mac/runtime`](../../../common/native-mac/README.md)
+replaces the Windows APIs. It uses no Wine, no Rosetta and no source code of
+the game. Direct3D 8 goes to DXVK (Direct3D to Vulkan) and MoltenVK (Vulkan
+to Metal), both native arm64 libraries.
 
-## Source of the app
+It started as a pilot (done 2026-10-07); the record of the work (time,
+problems, "source assists") is in [`PILOT-LOG.md`](PILOT-LOG.md). The
+community port GeneralsX is in [`../open-source-port`](../open-source-port/README.md).
 
-- The app is a community port of the game, built on the source code that EA
-  released. Its project name is "GeneralsX" (https://github.com/fbraz3/GeneralsX).
-  We use this name only here and in fixed paths that the app requires.
-- Installed version: 1.0.2 (release date 2026-09-28).
-- Download file: `macOS-GeneralsXZH.zip` from the GitHub release page.
-- The game data comes from the original Origin copy (base game and Zero Hour).
+Game data is not included. This repository never contains game files or
+code generated from them.
 
-## Source code (our fork)
+## Status (2026-10-07)
 
-`GeneralsX/` in this folder is a git submodule: our fork of the port,
-https://github.com/ishassan/GeneralsX (made on 2026-10-05 from
-`fbraz3/GeneralsX`). This repository keeps only the link and the commit to
-use. The files are in the fork. The fork has the port's license (GPL 3 or
-later), not the MIT license of this repository.
+Tested with scripted input (`GENERALSZH_SCRIPT`) and screenshots of the
+game's own frames:
 
-- Get the files: `git submodule update --init` (in the repository root).
-- Branches in the fork (all start from `fbraz3/GeneralsX` main after 1.0.2):
-  - One branch for each general fix. Each one can become a pull request to
-    `fbraz3/GeneralsX`.
-    - `fix/water-shader-assembler`: the water shaders (river, texbem water,
-      trapezoid water with sparkles). The port had no shader assembler on
-      macOS and Linux, so the water was drawn without these shaders.
-  - `custom`: our own changes, plus a merge of each fix branch. It stays in
-    the fork, and we build the app from it.
-    - Cmd+Enter or Option+Enter switches between full screen and a window.
-    - The app starts in a window (in full screen the game often skips the
-      intro movie). Start it with `-fullscreen` to start in full screen.
-- Build the app: `./make-app.sh` (in this folder). It builds the fork with
-  the conda env of the repository (`environment.yml`) and vcpkg (in the
-  ignored `build/vcpkg` of the repository root), then applies the local
-  changes below (steps 1 to 4). The result is
-  `build/Command & Conquer Generals Zero Hour.app`. It installs nothing.
-  The first build is slow, because vcpkg builds the libraries first.
-- The build uses the Homebrew `ffmpeg` and `libpng` of this Mac if they are
-  installed, as the official release does. The bundle step copies them into
-  the app, so the app itself does not need Homebrew.
-- The app that is installed now is the build of branch `custom`, fork commit
-  `a692659` (with the save fix), installed 2026-10-06. The build before it
-  (`5f02335`) is kept in `Old app backup (custom 5f02335, 2026-10-06)` in the
-  game folder. The downloaded 1.0.2 app went to the Trash on 2026-10-06.
-- The build step also makes the app self-contained: it points MoltenVK at the
-  C++ library of macOS and removes the paths to build folders from every
-  file. Without this, the app loaded `libc++` from the conda env.
+| Area | Result |
+|------|--------|
+| Start-up, intro movies (Bink), menus | Work. Escape skips the trailer (not the EA logo, as on Windows). |
+| 3D menu scene (shell map) | Draws with the correct ground, water, units and trees. |
+| Menu music, sound effects | Play (MP3 music from the game archives, Miles 6.5 calls). Not checked by ear. |
+| Mouse and keyboard in menus and in the game | Work. |
+| Skirmish against the AI | 10 minutes with no crash: units train, money and tooltips work, the AI attacks. 30 frames per second (the game's limit). |
+| Campaign | The USA campaign starts: briefing movie with sound, then the mission. |
+| Save and load | A save of the Windows version (Wine 8) loads in this port, and a save of this port loads in Wine 8. |
+| Speed (menu scene, 1280x800) | 0.25 CPU cores at 31 frames per second (window; 0.26 offscreen). Community port: 0.46 cores at about 70 fps; Wine 8: 2.22 cores at 21.8 fps. |
+| Process | arm64 only. |
 
-## Folder layout
+Known problems:
 
+- Multiplayer is off: sockets fail. The network start succeeds only so that
+  the skirmish player name ("Player") works.
+
+## Play
+
+1. The game data is the EA app copy in `~/Games/Command and Conquer
+   Generals Zero Hour/Original Game Files/` (the Zero Hour folder and the
+   base game folder next to it; layout: the top README). Another folder:
+   set `GENERALSZH_DATA`.
+2. Build the program and the app bundle (see below), then open
+   `Command & Conquer Generals Zero Hour (Native).app`.
+
+My Documents (options, maps, replays, the DXVK shader cache) is
+`native-mac/Settings/` of the game folder, and the saves are the shared
+`Saves/Zero Hour/` (`GAME_PATH_REDIRECTS` in `runtime/game.h`). The save
+format is the one of the Windows version (the same exe), so the Wine
+versions use the same saves. Saves of the community port (GeneralsX) do not
+load in this exe ("Error loading game", tested 2026-10-08), so GeneralsX
+keeps its own saves. Another My Documents: `GENERALSZH_DOCUMENTS` (the saves
+are then in its own `Save` folder).
+
+The first start (no `Options.ini` yet) takes about one minute with no
+window: the game runs its own speed test (memory copy loops timed with
+`clock`) to set the detail level. On this Mac it sets Medium; change it in
+the options menu. Later starts skip the test.
+
+## Build
+
+From the repository root (once): `conda env create -f environment.yml`
+(FFmpeg for Bink is in it), `. common/native-mac/tools/env.sh`,
+`common/native-mac/tools/install-ldc.sh`. The DXVK headers and libraries
+come from the community port build (`../open-source-port/make-app.sh`). Then:
+
+```sh
+cd games/command-and-conquer-generals-zero-hour/native-mac
+. ../../../common/native-mac/tools/env.sh
+make tools                       # once for all games
+make                             # reads game.dat from the Wine game folder; about 10 minutes
+../../../common/native-mac/macos/make-bundle.sh   # build/Command & Conquer Generals Zero Hour (Native).app
 ```
-~/Games/Command and Conquer Generals Zero Hour/
-  Command & Conquer Generals Zero Hour.app   the game (double-click to play)
-  Game Data/
-    Command and Conquer Generals/            base game files (.big)
-    Command and Conquer Generals Zero Hour/  Zero Hour files (.big)
-  Settings and Saves/                        settings, saves, maps
-  Old Windows Saves/                         saves and options of the Wine version
-  Wine/
-    Command & Conquer Generals Zero Hour (Wine).app   the original game on Wine
-    wineprefix/                              the Wine prefix of that app, with
-                                             the files that only Wine needs
-  README.md                                  a pointer to this file
-```
 
-## Decisions
+The app is about 150 MB: FFmpeg from conda brings its dependencies.
 
-1. Each game has its own folder in `~/Games`. The folder holds the app and all
-   of the game's data.
-2. Use the official game name. Do not use the port's name where we can avoid it.
-3. The game files are in `Game Data`, next to the app. The launcher script
-   finds them there. There is no `~/GeneralsX` folder or link.
-4. Settings and saves are in `Settings and Saves`. The app always uses
-   `~/Library/Application Support/GeneralsX`, and we cannot change this path.
-   That path is a link to `Settings and Saves`.
-5. The original Porting Kit (Wine) version went to the Trash on 2026-10-03.
-   On 2026-10-05 the user asked for a Wine version again, to compare with the
-   native app when a problem occurs. It is in `Wine/` (see "Wine version"
-   below).
-6. Windows files (rule of 2026-10-05, for all games in `~/Games`): a file
-   that neither app uses goes to the Trash. A file that only the native app
-   needs stays in `Game Data`. A file that only the Wine version needs goes
-   into `Wine/`. A file that both need stays in `Game Data`.
-7. Updates are optional. The game checks GitHub when it starts and shows a
-   message, but it does not install anything. For single-player play, an
-   update is only necessary to fix a problem. For online play, an update can
-   be necessary to match other players.
-8. Before you install a new version, do security checks on the download.
+## Debug options
 
-## Wine version (for comparison)
+Environment variables (prefix `GENERALSZH_`):
 
-See [../wine/README.md](../wine/README.md).
+| Variable | Effect |
+|---|---|
+| `DATA`, `DOCUMENTS` | Other folders for the game data and the saves. |
+| `DXVK_DIR` | Load DXVK, the Vulkan loader and MoltenVK from this folder (default: the app's `Frameworks`). |
+| `SCRIPT` | Scripted input (see `common/native-mac/runtime/input-script.c`). |
+| `BACKGROUND=offscreen` | No window and no focus: SDL's offscreen driver (Vulkan headless surfaces), no sound. Screenshots still work. |
+| `DUMP_TEXTURES` | Save each texture that the game fills (16- and 32-bit formats) as a BMP file there. |
+| `DUMP` | Save every 30th frame and the script's `shot` frames as BMP files there. |
+| `TRACE_D3D8` | 1: failed calls; 2: every call; 3: every call with its arguments. |
+| `TRACE_SOUND`, `TRACE_VIDEO`, `TRACE_FILES`, `TRACE_REG`, `TRACE_EH`, `TRACE_LAG` | Traces of Miles, Bink, files, registry, C++ exceptions, frame times. |
 
-## Paths that we cannot change (fixed in the compiled app)
+## Port notes
 
-| Path | Contents | What we did |
-|---|---|---|
-| `~/Library/Application Support/GeneralsX` | settings, saves, maps, `registry.ini` | Link to `Settings and Saves` |
-| `Settings and Saves/GeneralsZH` | subfolder name made by the app | Kept |
-| `~/.generals_online` | online lobby login tokens | Kept in the home folder (hidden, holds login secrets) |
-| Version text in the game menu | shows the port's name | Kept (needs a rebuild to change) |
+These are for the EA app `game.dat` 1.04 (sha256 in `game.conf`; the build
+stops for another file):
 
-## Local changes to the app (apply again after each update)
+- `srw/data_in_text.txt`: the DirectInput keyboard data format at
+  `0x7d7730` is in `.text`.
+- `srw/llasm/instruction_replacements.sci`: four `cmp [list], list` checks,
+  two spin locks (`lock bts`), one load of a code address, and two size
+  checks in the shadow buffer manager. In 1.04 a mesh with too many shadow
+  polygons reads past the table of buffer slots (the menu scene crashed
+  after 75 s); now it gets no slot and no shadow, as in the later source.
+- `GEN_RELOCS_OPTIONS=--strict-data-code` in `game.conf`: the relocation
+  finder accepts code pointers in data only at function starts (the big
+  `.text` holds many numbers that look like code addresses).
+- The game measures the CPU speed with `cpuid` and `rdtsc`, and turns the
+  3D menu scene off under 600 MHz. The runtime reports an Intel CPU with a
+  3 GHz time stamp counter and without MMX, 3DNow! or SSE, so the game
+  takes its x87 code paths (SRW does not translate the SIMD code).
+- The game keeps the pointer of a system-memory surface lock after the
+  unlock (the shroud), and some code ignores the lock pitch (the tree
+  texture). The Direct3D 8 layer handles both.
+- The D3DX box filter in the exe rounds with `lea ecx, [ecx + edx +
+  0x800080]`, and D3DX tables hold the same number. The strict relocation
+  rules keep these constants (otherwise the mip levels of the tree texture
+  are garbage).
+- The Miles end-of-sample callbacks run on the main thread (from `Sleep`
+  and `PeekMessageA`): the game's callback changes the audio manager's
+  lists, which the main loop uses at the same time.
+- SDL's offscreen driver has no display modes. The Direct3D 8 layer then
+  reports usual desktop modes, so an offscreen test makes the same device
+  (32-bit color, stencil buffer, volume shadows) as a windowed run.
+- The frame limiter calls `Sleep(0)` in a loop. The runtime makes repeated
+  `Sleep(0)` calls sleep 0.2 ms, which takes the CPU use from 1.04 to 0.26
+  cores at the same frame rate.
 
-An update replaces the whole `.app`, so all of these changes are lost. Apply
-them again, in this order.
+## License and credits
 
-1. Rename the app to `Command & Conquer Generals Zero Hour.app`, and put it in
-   the game folder (`~/Games/Command and Conquer Generals Zero Hour`).
-2. In `Contents/Info.plist`, set these values:
-   - `CFBundleName` and `CFBundleDisplayName`: `Command & Conquer Generals Zero Hour`
-   - `CFBundleIdentifier`: `local.games.command-and-conquer-generals-zero-hour`
-   - `CFBundleIconFile`: `Command and Conquer Generals Zero Hour.png`
-3. Rename these files inside `Contents`:
-   - `Resources/bin/GeneralsXZH` to `Resources/bin/Command and Conquer Generals Zero Hour`
-   - `Resources/generalsx-zh_icon.png` to `Resources/Command and Conquer Generals Zero Hour.png`
-   - Remove the link `MacOS/GeneralsXZH`. Make a link `MacOS/Command and Conquer Generals Zero Hour` that points to `run.sh`.
-4. In `Contents/MacOS/run.sh`, change two parts:
-   - Replace the block that sets `CNC_GENERALS_PATH` and `CNC_GENERALS_ZH_PATH`
-     to `~/GeneralsX/...` with this block:
-
-     ```bash
-     # LOCAL CHANGE (see README.md in the game folder): game files are in the
-     # "Game Data" folder next to this app, not in ~/GeneralsX.
-     GAME_DIR="$(cd "${CONTENTS_DIR}/../.." && pwd)"
-     if [[ -z "${CNC_GENERALS_PATH:-}" ]]; then
-         export CNC_GENERALS_PATH="${GAME_DIR}/Game Data/Command and Conquer Generals"
-     fi
-     if [[ -z "${CNC_GENERALS_ZH_PATH:-}" ]]; then
-         export CNC_GENERALS_ZH_PATH="${GAME_DIR}/Game Data/Command and Conquer Generals Zero Hour"
-     fi
-     ```
-
-   - In the last command, change `"${BIN_DIR}/GeneralsXZH"` to
-     `"${BIN_DIR}/Command and Conquer Generals Zero Hour"`.
-   - If the new `run.sh` is very different from the old one, compare the two
-     files before you change it. Keep all new lines from the update.
-5. Register the app again:
-   `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "<path to the app>"`
-6. Make sure that the link `~/Library/Application Support/GeneralsX` still
-   points to `Settings and Saves`. Make sure that no `~/GeneralsX` folder exists.
-
-## Update procedure
-
-1. Keep the old app until the new one works. Move it to the Trash only at the end.
-2. Download the new `macOS-GeneralsXZH.zip` to a temporary folder. Do not open it yet.
-3. Security checks:
-   - Compare the SHA-256 of the zip with the digest that GitHub shows for the file.
-   - Make sure that the file was uploaded by `github-actions[bot]` from a release
-     workflow run on the tagged commit.
-   - All Mach-O files must be arm64 (`file`, `lipo -archs`).
-   - Every library that the app loads (`otool -L`) must be inside the app or
-     part of macOS.
-   - Read `run.sh` and every other script in full.
-   - No LaunchAgents, login items, `crontab`, or `osascript` use.
-   - Look at the web addresses in the binaries (`strings`). Expected: game
-     lobby servers, STUN/TURN servers, and the GitHub update check.
-4. Apply the local changes above.
-5. Test:
-   - Start the app with a double-click. The game must reach the main menu.
-   - The process must be native: in `vmmap <pid>`, "Code Type" is ARM64.
-   - `lsof -p <pid>` must show `.big` files from `Game Data`.
-   - Load a save, then save once. The new file must appear in
-     `Settings and Saves/GeneralsZH/Save`.
-6. Update the "Installed version" line in this file.
-
-## Check log
-
-- 2026-10-03: 1.0.2 installed and passed the security checks. Started from
-  the game folder: native ARM64, reached the main menu, and loaded `.big` files
-  from `Game Data`. Not tested yet: a new save written through the
-  `Settings and Saves` link.
-
-- 2026-10-06: build of branch `custom` (fork commit `5f02335`) tested in a
-  window, and then installed. ARM64; every library loads from inside the app;
-  the main menu shows the online entry; the intro plays in the window;
-  water shows its sparkles; Cmd+Enter switches to full screen and back; the
-  settings and saves did not change (19 files, same checksums). Not tested:
-  loading a save, and water inside a mission.
-
-- 2026-10-06, later: the installed build (`5f02335`) loaded the save "GLA 1",
-  saved once to a new file, and loaded that file again. River water inside
-  the mission moves. The 17 old save files did not change. Windows saves showed
-  broken names in the load list ("GA5" and boxes).
-
-- 2026-10-06: build of fork commit `a692659` (adds the save fix
-  `fix/load-retail-unicode-saves`) tested in a copy of the app, not installed.
-  The Windows saves show their real names, and the Windows save "GLA 5" loads
-  and plays. The Wine version loads the same save with the same state
-  ($6900).
-
-- 2026-10-06: the same build installed. ARM64; 47 `.big` files open from
-  `Game Data`; the load list shows the real names of the Windows saves; the
-  save "GLA 1" made by the native app loads and plays. Settings and saves did
-  not change (20 files, same checksums).
-
-## Camera in the main menu
-
-The camera height in the menu is the same as in the Wine version. The
-menu only looks different because the two versions show different moments
-of the scripted battle at the same time after the start, and because the Wine
-version does not draw the menu frame.
-
-- Check of 2026-10-06 (1280x800 window, 24 frames each, 5 s apart): where
-  the same object is in both pictures (the junk boat on the beach), it has
-  about the same size in native and in Wine 8 (125 and 120 pixels wide in
-  the scaled pictures, measured by eye).
-- Tested and ruled out: a build with `PRESERVE_RETAIL_SCRIPTED_CAMERA` set
-  to `1` in `Core/GameEngine/Include/Common/GameDefines.h` (the retail
-  scripted camera of upstream pull request 2524). Also ruled out:
-  `MaxCameraHeight = 310` in place of 350 in `SagePatch.ini` (on a copy of
-  the settings). The menu did not change in either test. The change was not
-  kept.
-- An earlier note (also 2026-10-06) said that the menu camera is about 1.3
-  times higher. That came from pictures of different moments, and it is
-  wrong.
-- In a mission the two versions also look almost the same (same save,
-  1024x768).
-
-## Known problems
-
-- Intro movie (1.0.2, tested 2026-10-03): in full screen the game goes
-  directly to the main menu with no intro (3 of 3 starts). In window mode
-  (`-win`) the intro plays. The shader cache file is not the cause. The user
-  saw the intro one time in full screen, so the problem does not occur every
-  time. Cause not found yet. Reported as https://github.com/fbraz3/GeneralsX/issues/354, then closed by us the same day (not planned). Check again after each update.
+- M-HT/SR: Copyright (C) Roman Pauer, MIT license.
+- DXVK (zlib license) and MoltenVK (Apache 2.0) come from the community port
+  build; FFmpeg (LGPL 2.1 or later) comes from conda-forge.
+- The files in this folder: MIT license (see [LICENSE](../../../LICENSE)).
+- *Command & Conquer Generals Zero Hour* is a game by Electronic Arts. You
+  need your own copy.

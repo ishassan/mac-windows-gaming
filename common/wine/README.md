@@ -169,7 +169,7 @@ of OpenGL calls from 32-bit code through that layer.
 
 ### What could make Wine 11 as good as Wine 8
 
-1. Revenant: `csmt=0` (in `games/revenant/wine/prefix.reg` since
+1. Revenant: `csmt=0` (in `games/revenant/wine-11-athei/prefix.reg` since
    2026-10-06). With software 3D, Wine 11 is then as good as Wine 8.
 2. A newer Wine 11 build: not a fix for the white ground (Wine 11.16 on
    the Mac has it too, see above). `wine-devel` or `wine-staging` 11.18
@@ -186,24 +186,31 @@ of OpenGL calls from 32-bit code through that layer.
 
 ```
 ~/Games/<Game>/
-  <Game> (Native).app        the native port (see <game>/native-mac)
-  Game Data/                 the game files and the saves
-  Wine/
-    <Game> (Wine).app        the Wine version (make-app.sh)
-    wineprefix/              the Wine prefix (Revenant: wineprefix_cx)
-    wine-launcher.log        the output of the last starts
+├── Original Game Files      the game files (shared by all versions)
+├── Saves                    the saves (shared)
+├── native-mac               the native port (see <game>/native-mac)
+├── wine-11-athei
+│   ├── <Game> (Wine).app    the Wine version on athei (make-app.sh)
+│   ├── wineprefix           the Wine prefix
+│   ├── Settings             the settings of this version
+│   └── wine-launcher.log    the output of the last starts
+└── wine-8                   the same on Wine 8: <Game> (Wine 8).app, wineprefix, Settings
 ```
 
-The Wine version does not run the game from `Game Data/` directly. Each
-prefix has a real game folder (the `C:\...` folder that the game sees). It
-holds:
+The Wine version does not run the game from `Original Game Files/`
+directly. Each prefix has a real game folder (the `C:\...` folder that the
+game sees). It holds:
 
 - the Windows files that only the Wine version needs (the list is in each
-  game's `wine/README.md`), and
-- a link to each item in `Game Data/`.
+  game's `wine-11-athei/README.md`),
+- links to the shared `Saves` and to the version's `Settings`, where the
+  game writes its saves and settings into this folder or into My
+  Documents, and
+- a link to each item in `Original Game Files/`.
 
-So both versions use the same game files and, where noted, the same saves.
-When it starts, the Wine app adds a link for each new item in `Game Data/`.
+So all versions use the same game files and, where the game allows it, the
+same saves. When it starts, the Wine app sets these links and adds a link
+for each new item in `Original Game Files/`.
 
 The DLLs must be next to the game program. Miles (the sound library) stops
 with "The MSS DLL is incorrectly installed in the Windows system directory"
@@ -211,21 +218,27 @@ when it is in the Windows system folder.
 
 ## The Wine app (`make-app.sh`)
 
-Each game has `wine/app/Info.plist` and `wine/app/launcher.sh`. The
-launcher:
+Each game has `wine-11-athei/app/Info.plist` and
+`wine-11-athei/app/launcher.sh`, and `wine-8/app/Info.plist` (the launcher
+there is a link to the same script). The launcher:
 
-1. sets `WINEPREFIX` to the prefix next to the app, and `WINEDEBUG=-all`;
+1. picks the Wine from the name of its version folder (`wine-8`: Wine 8,
+   else athei), sets `WINEPREFIX` to the prefix next to the app, and
+   `WINEDEBUG=-all`;
 2. makes the Wine user folders (Desktop, Downloads, ...) local folders, not
-   links to the Mac home folders. Where the game keeps its saves in My
-   Documents, `Documents` is a link into the game folder;
-3. adds the links to `Game Data/`;
+   links to the Mac home folders, for both Wine user names (the Mac user
+   name for Wine 8, `crossover` for athei). Where the game keeps its saves
+   or settings in My Documents, the matching folder is a link to `Saves` or
+   `Settings`;
+3. adds the links to `Saves`, `Settings` and `Original Game Files/`;
 4. changes to the Wine game folder and starts the game program. The output
    goes to the log file next to the app.
 
 Make the app:
 
 ```
-common/wine/make-app.sh <game>/wine/app "$HOME/Games/<Game>/Wine" <icon file>
+common/wine/make-app.sh <game>/wine-11-athei/app "$HOME/Games/<Game>/wine-11-athei" <icon file>
+common/wine/make-app.sh <game>/wine-8/app "$HOME/Games/<Game>/wine-8" <icon file>
 ```
 
 After you edit the launcher inside an app, sign the app again:
@@ -277,5 +290,6 @@ without the fix (tested 2026-10-05), so its file stays as it is.
     start (Revenant: "DDERR_OUTOFMEMORY"; Generals: "Please make sure you
     have DirectX 8.1"). So this test shows only that a program starts and
     finds its files and DLLs. For pictures, use the Linux test VM.
-  - The copy's links still point to the real `Game Data`, so a game can
-    write there (settings, logs). Back up the saves first.
+  - The copy's links still point to the real `Original Game Files`,
+    `Saves` and `Settings`, so a game can write there. Back up the saves
+    first. (`benchmark/relink.py` points the links of a copy at the copy.)

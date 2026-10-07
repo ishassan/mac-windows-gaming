@@ -37,6 +37,8 @@
 #include <stdarg.h>
 #include "printf_x86.h"
 #include "ptr32.h"
+#include "game-info.h"
+#include <strings.h>
 
 #if (defined(__WIN32__) || defined(__WINDOWS__)) && !defined(_WIN32)
 #define _WIN32
@@ -367,6 +369,30 @@ const char *CLIB_GetCurrentDir(void)
     return clib_cur_dir;
 }
 
+#ifdef GAME_PATH_REDIRECTS
+/* Paths that the game opens in its own folder, but that live elsewhere
+ * (GAME_PATH_REDIRECTS in game.h: pairs of a game path and the real path,
+ * both relative to the game folder, with "/"). Example: the settings file
+ * and the saves of Revenant go to the version's Settings folder and to the
+ * shared Saves folder, not into the original game files. */
+static const char *const path_redirects[] = { GAME_PATH_REDIRECTS, NULL };
+
+static void redirect_path(char *dst)
+{
+    char tmp[4096];
+    for (int i = 0; path_redirects[i] != NULL && path_redirects[i + 1] != NULL; i += 2)
+    {
+        size_t n = strlen(path_redirects[i]);
+        if (strncasecmp(dst, path_redirects[i], n) == 0 && (dst[n] == 0 || dst[n] == '/'))
+        {
+            snprintf(tmp, sizeof(tmp), "%s%s", path_redirects[i + 1], dst + n);
+            strcpy(dst, tmp);
+            return;
+        }
+    }
+}
+#endif
+
 int CLIB_FindFile(const char *src, char *dst)
 {
     char *d;
@@ -397,6 +423,9 @@ int CLIB_FindFile(const char *src, char *dst)
         *d = (*src == '\\') ? '/' : *src;
     }
     *d = 0;
+#ifdef GAME_PATH_REDIRECTS
+    redirect_path(dst);
+#endif
 
     return (0 == access(dst, F_OK)) ? 1 : 0;
 }

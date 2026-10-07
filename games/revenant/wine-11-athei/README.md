@@ -2,6 +2,8 @@
 
 The original Windows Revenant (GOG, version 1.22) on Wine. It is a
 reference for the native port ([../native-mac](../native-mac/README.md)).
+This folder is for the athei Wine (the default); [../wine-8](../wine-8/README.md)
+is the same setup on Wine 8.
 The parts that all Wine versions share (Wine, folder layout, the Miles fix,
 test methods) are in [../../../common/wine](../../../common/wine/README.md).
 
@@ -9,26 +11,33 @@ test methods) are in [../../../common/wine](../../../common/wine/README.md).
 
 | File | What it is |
 |---|---|
-| `app/Info.plist`, `app/launcher.sh` | The Wine app (`common/wine/make-app.sh`). |
+| `app/Info.plist`, `app/launcher.sh` | The Wine app (`common/wine/make-app.sh`). The launcher is the same for both Wine versions: the name of the version folder picks the Wine. |
 | `prefix.reg` | The registry settings of the prefix. Import: `wine regedit /S prefix.reg` (with `WINEPREFIX`). |
-| `play_revenant.sh` | Starts the Wine version from a terminal (put it in `~/Games/Revenant/Wine`). It does what the app does, but it does not add the links to `Game Data` and it starts Wine in the background. |
 | `dispmode-fix/` | Source of the display-mode fix (`dispmode_fix.c`, `_inmm.def`). |
 
 ## Layout on the Mac
 
 ```
 ~/Games/Revenant/
-  Revenant (Native).app
-  Game Data/                     the GOG game, the saves (Save/), Curmap/, revenant.ini
-  Wine/
-    Revenant (Wine).app
-    wineprefix_cx/               the Wine prefix
-      drive_c/Revenant/          C:\Revenant: the Wine-only files and a link to each Game Data item
-    revenant-launcher.log
+├── Original Game Files        the GOG game
+├── Saves                      the saves (shared by all versions)
+├── native-mac
+├── wine-11-athei
+│   ├── Revenant (Wine).app
+│   ├── Settings               revenant.ini and Curmap/ of this version
+│   ├── wineprefix             the Wine prefix
+│   │   └── drive_c/Revenant   C:\Revenant: the Wine-only files and links
+│   ├── scale_game.py          an old tool that scales the game window to the screen
+│   └── wine-launcher.log
+└── wine-8                     the same for Wine 8
 ```
 
-The native app and Wine use the same game files and the same saves
-(`Save/`), current map (`Curmap/`) and settings (`revenant.ini`).
+The game writes its saves (`Save\`), the current map (`Curmap\`) and its
+settings (`revenant.ini`) into its own folder. In `C:\Revenant`, `Save` is a
+link to the shared `Saves`, and `revenant.ini` and `Curmap` are links to
+`Settings` of the version. The other items are links to `Original Game
+Files`. The launcher makes these links before each start. The native port
+uses the same `Saves` and its own `native-mac/Settings`.
 
 ## Wine-only files (in `C:\Revenant`)
 
@@ -59,11 +68,13 @@ settings in it), not a recorded command history.
    `WINEDLLOVERRIDES="mscoree,mshtml="` set. (The installed prefix was made
    with Wine 8 and then updated by athei; a new prefix made with athei is
    not tested yet.)
-2. Put the GOG game in `~/Games/Revenant/Game Data` (the files that the
-   native port also needs).
+2. Put the GOG game in `~/Games/Revenant/Original Game Files` (the files
+   that the native port also needs). Move its `Save` folder to
+   `~/Games/Revenant/Saves`, and its `revenant.ini` to
+   `wine-11-athei/Settings/`.
 3. Make the prefix:
-   `WINEPREFIX="$HOME/Games/Revenant/Wine/wineprefix_cx" wine wineboot -i`.
-4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/revenant/wine/prefix.reg`.
+   `WINEPREFIX="$HOME/Games/Revenant/wine-11-athei/wineprefix" wine wineboot -i`.
+4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/revenant/wine-11-athei/prefix.reg`.
    It sets `ddraw=builtin` (the Wine DirectDraw, not a replacement
    `ddraw.dll`), the Mac driver value `ForceOpenGLBackingStore=y`, and
    Direct3D `csmt=0` (since 2026-10-06). With `csmt=0`, Revenant used
@@ -72,22 +83,22 @@ settings in it), not a recorded command history.
    and without it differ no more than two runs with the same setting.
    The real Wine app started with it on 2026-10-06 and reached the main
    menu (0.21 cores in the menu); the saves did not change.
-5. Make `wineprefix_cx/drive_c/Revenant` and copy the Wine-only files above
+5. Make `wineprefix/drive_c/Revenant` and copy the Wine-only files above
    from the GOG install into it. Rename the GOG `_inmm.dll` to
    `_inmm_real.dll`.
 6. Build the display-mode fix (needs `brew install mingw-w64`) and copy it
    into `C:\Revenant`:
 
    ```
-   cd games/revenant/wine/dispmode-fix
+   cd games/revenant/wine-11-athei/dispmode-fix
    i686-w64-mingw32-gcc -shared -o _inmm.dll dispmode_fix.c _inmm.def -luser32 -lkernel32 -O2
    ```
 
 7. Patch Miles: `common/wine/patch-miles.py "<prefix>/drive_c/Revenant/mss32.dll"`.
 8. Make the app:
-   `common/wine/make-app.sh games/revenant/wine/app "$HOME/Games/Revenant/Wine" "$HOME/Games/Revenant/Game Data/Revenant.icns"`.
-9. Start the app. At each start it adds a link for each new `Game Data`
-   item.
+   `common/wine/make-app.sh games/revenant/wine-11-athei/app "$HOME/Games/Revenant/wine-11-athei" "$HOME/Games/Revenant/Original Game Files/Revenant.icns"`.
+9. Start the app. At each start it sets the `Save`, `revenant.ini` and
+   `Curmap` links and adds a link for each new `Original Game Files` item.
 
 Check (2026-10-05): in a new prefix in the Linux test VM, `prefix.reg`
 imports with the same values as the installed prefix. `make-app.sh` makes an app that is the same as the
@@ -170,10 +181,10 @@ port reads this value as `No` and draws the figures with Direct3D.
 - No window in front: use Cmd+Tab or Mission Control to find the Wine
   window.
 - `Launcher.exe` (Run Revenant, then Start Game in its Options window)
-  writes `revenant.ini` in `Game Data` again, with the values of that
-  window: with the device "DirectDraw HAL" it sets `Software3D=No`, removes
-  the empty lines and adds keys (`DisplayMode`, `Detail` and more). The
-  native app reads the same file. Keep a copy of `revenant.ini` before you
-  use the launcher (seen on 2026-10-05; the file was put back).
+  writes `revenant.ini` again (through the link: `Settings/revenant.ini` of
+  the version), with the values of that window: with the device "DirectDraw
+  HAL" it sets `Software3D=No`, removes the empty lines and adds keys
+  (`DisplayMode`, `Detail` and more). Keep a copy of `revenant.ini` before
+  you use the launcher (seen on 2026-10-05; the file was put back).
 - Revenant in the Linux test VM crashed in `smackw32.dll` without a sound
   device (see `linux-test-vm/README.md`).

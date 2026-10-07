@@ -53,20 +53,26 @@ Known limits:
 
 ## Play
 
-1. Install the GOG game. The default folder is `~/Games/Revenant/Game Data`
-   (the folder with `resources.rvr`). Another folder: set `REVENANT_DATA`.
+1. Install the GOG game. The default folder is
+   `~/Games/Revenant/Original Game Files` (the folder with `resources.rvr`;
+   layout: the top README). Another folder: set `REVENANT_DATA`.
 2. Build the program and the app bundle (see below), then open
    `Revenant (Native).app`.
 
 The game starts in full screen at the size of your screen (the 640x480
 picture is scaled, with its shape kept). Cmd+Return or Alt+Return switches
 between full screen and a window. To start in a window, put
-`Display_Mode=window` in `Revenant-native.cfg` in the game folder
+`Display_Mode=window` in `native-mac/Settings/Revenant-native.cfg` of the game folder
 (`desktop` is the default; `fullscreen` changes the display mode). The
 game's own `Windowed` setting in `revenant.ini` has no effect in this port.
 
-Saves go to `Save/` in the game folder, as in the Windows version. The game
-keeps the current map in `Curmap/` and its settings in `revenant.ini`.
+The game writes its saves to `Save/`, the current map to `Curmap/` and its
+settings to `revenant.ini`, all in its own folder. The port sends them
+elsewhere (`GAME_PATH_REDIRECTS` in `runtime/game.h`): the saves go to
+`Saves/` of the game folder, next to `Original Game Files` (the Wine versions
+use the same folder), and `revenant.ini`, `Curmap/`, `revboot.log` and
+`ss.bmp` go to `native-mac/Settings/`. The original game files stay as they
+are.
 
 ## Build
 
@@ -77,7 +83,7 @@ From the repository root (once): `conda env create -f environment.yml`,
 cd games/revenant/native-mac
 . ../../../common/native-mac/tools/env.sh
 make tools                       # once for all games
-make                             # reads Revenant.exe from ~/Games/Revenant/Game Data
+make                             # reads Revenant.exe from ~/Games/Revenant/Original Game Files
 ../../../common/native-mac/macos/make-bundle.sh   # build/Revenant (Native).app
 ```
 
