@@ -16,7 +16,7 @@ registry settings are the ones of `../wine-11-athei`.
 ## Layout on the Mac
 
 ```
-~/Games/Revenant/wine-8/
+~/Games/Revenant/other-versions/wine-8/
 ├── Revenant (Wine 8).app
 ├── wineprefix          the Wine 8 prefix
 ├── Settings            the settings of this version
@@ -33,5 +33,5 @@ registry settings are the ones of `../wine-11-athei`.
 ## Make the app
 
 ```sh
-common/wine/make-app.sh games/revenant/wine-8/app "$HOME/Games/Revenant/wine-8" "$HOME/Games/Revenant/Original Game Files/Revenant.icns"
+common/wine/make-app.sh games/revenant/other-versions/wine-8/app "$HOME/Games/Revenant/other-versions/wine-8" "$HOME/Games/Revenant/Original Game Files/Revenant.icns"
 ```

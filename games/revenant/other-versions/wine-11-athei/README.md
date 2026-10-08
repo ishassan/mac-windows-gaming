@@ -1,11 +1,11 @@
 # Revenant on Wine (reference version)
 
 The original Windows Revenant (GOG, version 1.22) on Wine. It is a
-reference for the native port ([../native-mac](../native-mac/README.md)).
+reference for the native port ([../../native-mac](../../native-mac/README.md)).
 This folder is for the athei Wine (the default); [../wine-8](../wine-8/README.md)
 is the same setup on Wine 8.
 The parts that all Wine versions share (Wine, folder layout, the Miles fix,
-test methods) are in [../../../common/wine](../../../common/wine/README.md).
+test methods) are in [../../../../common/wine](../../../../common/wine/README.md).
 
 ## Files here
 
@@ -63,7 +63,7 @@ earlier sessions, so this list repeats its result (the files and the
 settings in it), not a recorded command history.
 
 1. Install Wine: `common/wine/install-athei.sh` (the athei CrossOver 26.3
-   build, see [`common/wine`](../../../common/wine/README.md)). In the steps
+   build, see [`common/wine`](../../../../common/wine/README.md)). In the steps
    below, `wine` is `"$HOME/Applications/Wine athei/wine/bin/wine"`, with
    `WINEDLLOVERRIDES="mscoree,mshtml="` set. (The installed prefix was made
    with Wine 8 and then updated by athei; a new prefix made with athei is
@@ -71,10 +71,10 @@ settings in it), not a recorded command history.
 2. Put the GOG game in `~/Games/Revenant/Original Game Files` (the files
    that the native port also needs). Move its `Save` folder to
    `~/Games/Revenant/Saves`, and its `revenant.ini` to
-   `wine-11-athei/Settings/`.
+   `other-versions/wine-11-athei/Settings/`.
 3. Make the prefix:
-   `WINEPREFIX="$HOME/Games/Revenant/wine-11-athei/wineprefix" wine wineboot -i`.
-4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/revenant/wine-11-athei/prefix.reg`.
+   `WINEPREFIX="$HOME/Games/Revenant/other-versions/wine-11-athei/wineprefix" wine wineboot -i`.
+4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/revenant/other-versions/wine-11-athei/prefix.reg`.
    It sets `ddraw=builtin` (the Wine DirectDraw, not a replacement
    `ddraw.dll`), the Mac driver value `ForceOpenGLBackingStore=y`, and
    Direct3D `csmt=0` (since 2026-10-06). With `csmt=0`, Revenant used
@@ -90,13 +90,13 @@ settings in it), not a recorded command history.
    into `C:\Revenant`:
 
    ```
-   cd games/revenant/wine-11-athei/dispmode-fix
+   cd games/revenant/other-versions/wine-11-athei/dispmode-fix
    i686-w64-mingw32-gcc -shared -o _inmm.dll dispmode_fix.c _inmm.def -luser32 -lkernel32 -O2
    ```
 
 7. Patch Miles: `common/wine/patch-miles.py "<prefix>/drive_c/Revenant/mss32.dll"`.
 8. Make the app:
-   `common/wine/make-app.sh games/revenant/wine-11-athei/app "$HOME/Games/Revenant/wine-11-athei" "$HOME/Games/Revenant/Original Game Files/Revenant.icns"`.
+   `common/wine/make-app.sh games/revenant/other-versions/wine-11-athei/app "$HOME/Games/Revenant/other-versions/wine-11-athei" "$HOME/Games/Revenant/Original Game Files/Revenant.icns"`.
 9. Start the app. At each start it sets the `Save`, `revenant.ini` and
    `Curmap` links and adds a link for each new `Original Game Files` item.
 

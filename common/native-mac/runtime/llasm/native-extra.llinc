@@ -94,6 +94,6 @@ endm
 ; "lock bts dword [addr], 0": returns the old bit 0 in tmp0 (atomic)
 func x86_lock_bts0 *addr
 
-; Generals Zero Hour (games/command-and-conquer-generals-zero-hour/native-mac/runtime/llasm/xfer-unicode.c):
+; Generals Zero Hour (games/command-and-conquer-generals-zero-hour/other-versions/native-mac/runtime/llasm/xfer-unicode.c):
 ; read the characters of a save-file Unicode string of either width; 1 in tmp0 when done
 func generals_xfer_read_unicode self, *buffer, size

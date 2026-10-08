@@ -35,11 +35,20 @@ WINDOW = {"cmd": (30, 90), "rev": (40, 95), "gen": (150, 270)}[game]
 SHOTS = {"cmd": (40, 85), "rev": (50, 90), "gen": (160, 265)}[game]
 END = {"gen": 275}.get(game)
 
+
+def version_dir(root, game, version):
+    """The folder of a version: the main version is at the top of the game
+    folder (native-mac; Generals: open-source-port), the others are in
+    other-versions/ (~/Games/README.md)."""
+    main = "open-source-port" if game == "gen" else "native-mac"
+    return f"{root}/{NAMES[game]}" + ("" if version == main else "/other-versions") + f"/{version}"
+
+
 if wine == "native":
     exe, prefix_env = {
-        "cmd": (f"{G}/{NAMES['cmd']}/native-mac/Commandos Behind Enemy Lines (Native).app/Contents/MacOS/Commandos", "COMMANDOS"),
-        "rev": (f"{G}/{NAMES['rev']}/native-mac/Revenant (Native).app/Contents/MacOS/Revenant", "REVENANT"),
-        "gen": (f"{G}/{NAMES['gen']}/native-mac/Command & Conquer Generals Zero Hour (Native).app/Contents/MacOS/GeneralsZH", "GENERALSZH"),
+        "cmd": (f"{version_dir(G, 'cmd', 'native-mac')}/Commandos Behind Enemy Lines (Native).app/Contents/MacOS/Commandos", "COMMANDOS"),
+        "rev": (f"{version_dir(G, 'rev', 'native-mac')}/Revenant (Native).app/Contents/MacOS/Revenant", "REVENANT"),
+        "gen": (f"{version_dir(G, 'gen', 'native-mac')}/Command & Conquer Generals Zero Hour (Native).app/Contents/MacOS/GeneralsZH", "GENERALSZH"),
     }[game]
     # The data folder of the copy; the port finds its Settings and the Saves
     # next to it (GAME_PATH_REDIRECTS in its game.h).
@@ -50,7 +59,7 @@ if wine == "native":
     kill = lambda: None
 else:
     wb = "/opt/homebrew/bin" if wine == "w8" else f"{ATHEI}/wine/bin"
-    pfx = f"{W}/{NAMES[game]}/{'wine-8' if wine == 'w8' else 'wine-11-athei'}/wineprefix"
+    pfx = f"{version_dir(W, game, 'wine-8' if wine == 'w8' else 'wine-11-athei')}/wineprefix"
     env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG="fps", MVK_CONFIG_LOG_LEVEL="0", WINEDLLOVERRIDES="mscoree,mshtml=")
     if wine == "athei":
         env.update(ROSETTA_X87_PATH=f"{ATHEI}/x87sidecar", DYLD_INSERT_LIBRARIES=f"{ATHEI}/qos.dylib")

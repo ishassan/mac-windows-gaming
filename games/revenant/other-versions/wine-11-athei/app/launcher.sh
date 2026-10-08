@@ -7,9 +7,9 @@
 # Layout (~/Games/README.md):
 #   Revenant/Original Game Files/      the game (shared)
 #   Revenant/Saves/                    the saves (shared; the game's Save folder)
-#   Revenant/<version>/<this app>
-#   Revenant/<version>/wineprefix/     the Wine prefix
-#   Revenant/<version>/Settings/       revenant.ini and Curmap (the work files of the current map)
+#   Revenant/other-versions/<version>/<this app>
+#   Revenant/other-versions/<version>/wineprefix/     the Wine prefix
+#   Revenant/other-versions/<version>/Settings/       revenant.ini and Curmap (the work files of the current map)
 # C:\Revenant (wineprefix/drive_c/Revenant) is a real folder with the files
 # that only Wine needs, the links Save, revenant.ini and Curmap, and a link
 # to each item in Original Game Files:
@@ -29,7 +29,10 @@
 
 APP="$(cd "$(dirname "$0")/../.." && pwd)"
 VERSION_DIR="$(dirname "$APP")"
+# The game folder is the nearest folder above with "Original Game Files": the main
+# version is at the top of the game folder, the other versions are in other-versions/.
 GAME_ROOT="$(dirname "$VERSION_DIR")"
+while [ ! -d "$GAME_ROOT/Original Game Files" ] && [ "$GAME_ROOT" != / ]; do GAME_ROOT="$(dirname "$GAME_ROOT")"; done
 GAME_FILES="$GAME_ROOT/Original Game Files"
 SAVES="$GAME_ROOT/Saves"
 SETTINGS="$VERSION_DIR/Settings"

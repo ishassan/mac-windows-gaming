@@ -169,7 +169,7 @@ of OpenGL calls from 32-bit code through that layer.
 
 ### What could make Wine 11 as good as Wine 8
 
-1. Revenant: `csmt=0` (in `games/revenant/wine-11-athei/prefix.reg` since
+1. Revenant: `csmt=0` (in `games/revenant/other-versions/wine-11-athei/prefix.reg` since
    2026-10-06). With software 3D, Wine 11 is then as good as Wine 8.
 2. A newer Wine 11 build: not a fix for the white ground (Wine 11.16 on
    the Mac has it too, see above). `wine-devel` or `wine-staging` 11.18
@@ -188,13 +188,15 @@ of OpenGL calls from 32-bit code through that layer.
 ~/Games/<Game>/
 ├── Original Game Files      the game files (shared by all versions)
 ├── Saves                    the saves (shared)
-├── native-mac               the native port (see <game>/native-mac)
-├── wine-11-athei
-│   ├── <Game> (Wine).app    the Wine version on athei (make-app.sh)
-│   ├── wineprefix           the Wine prefix
-│   ├── Settings             the settings of this version
-│   └── wine-launcher.log    the output of the last starts
-└── wine-8                   the same on Wine 8: <Game> (Wine 8).app, wineprefix, Settings
+├── native-mac               the version to play (Generals: open-source-port)
+└── other-versions
+    ├── wine-11-athei
+    │   ├── <Game> (Wine).app    the Wine version on athei (make-app.sh)
+    │   ├── wineprefix           the Wine prefix
+    │   ├── Settings             the settings of this version
+    │   └── wine-launcher.log    the output of the last starts
+    ├── wine-8               the same on Wine 8: <Game> (Wine 8).app, wineprefix, Settings
+    └── native-mac           Generals only: our native port
 ```
 
 The Wine version does not run the game from `Original Game Files/`
@@ -202,7 +204,7 @@ directly. Each prefix has a real game folder (the `C:\...` folder that the
 game sees). It holds:
 
 - the Windows files that only the Wine version needs (the list is in each
-  game's `wine-11-athei/README.md`),
+  game's `other-versions/wine-11-athei/README.md`),
 - links to the shared `Saves` and to the version's `Settings`, where the
   game writes its saves and settings into this folder or into My
   Documents, and
@@ -218,13 +220,15 @@ when it is in the Windows system folder.
 
 ## The Wine app (`make-app.sh`)
 
-Each game has `wine-11-athei/app/Info.plist` and
-`wine-11-athei/app/launcher.sh`, and `wine-8/app/Info.plist` (the launcher
-there is a link to the same script). The launcher:
+Each game has `other-versions/wine-11-athei/app/Info.plist` and
+`other-versions/wine-11-athei/app/launcher.sh`, and
+`other-versions/wine-8/app/Info.plist` (the launcher there is a link to the
+same script). The launcher:
 
 1. picks the Wine from the name of its version folder (`wine-8`: Wine 8,
    else athei), sets `WINEPREFIX` to the prefix next to the app, and
-   `WINEDEBUG=-all`;
+   `WINEDEBUG=-all`. The game folder is the nearest folder above the app
+   with `Original Game Files`;
 2. makes the Wine user folders (Desktop, Downloads, ...) local folders, not
    links to the Mac home folders, for both Wine user names (the Mac user
    name for Wine 8, `crossover` for athei). Where the game keeps its saves
@@ -237,8 +241,8 @@ there is a link to the same script). The launcher:
 Make the app:
 
 ```
-common/wine/make-app.sh <game>/wine-11-athei/app "$HOME/Games/<Game>/wine-11-athei" <icon file>
-common/wine/make-app.sh <game>/wine-8/app "$HOME/Games/<Game>/wine-8" <icon file>
+common/wine/make-app.sh games/<game>/other-versions/wine-11-athei/app "$HOME/Games/<Game>/other-versions/wine-11-athei" <icon file>
+common/wine/make-app.sh games/<game>/other-versions/wine-8/app "$HOME/Games/<Game>/other-versions/wine-8" <icon file>
 ```
 
 After you edit the launcher inside an app, sign the app again:

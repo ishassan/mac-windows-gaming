@@ -1,11 +1,11 @@
 # Commandos: Behind Enemy Lines on Wine (reference version)
 
 The original Windows Commandos (GOG) on Wine. It is a reference
-for the native port ([../native-mac](../native-mac/README.md)). This folder
+for the native port ([../../native-mac](../../native-mac/README.md)). This folder
 is for the athei Wine (the default); [../wine-8](../wine-8/README.md) is the
 same setup on Wine 8. The parts
 that all Wine versions share (Wine, folder layout, the Miles fix, test
-methods) are in [../../../common/wine](../../../common/wine/README.md).
+methods) are in [../../../../common/wine](../../../../common/wine/README.md).
 
 ## Files here
 
@@ -75,25 +75,25 @@ These steps repeat the result of the prefix of 2026-10-05 (the files and
 the settings in it), not a recorded command history.
 
 1. Install Wine: `common/wine/install-athei.sh` (the athei CrossOver 26.3
-   build, see [`common/wine`](../../../common/wine/README.md)). In the steps
+   build, see [`common/wine`](../../../../common/wine/README.md)). In the steps
    below, `wine` is `"$HOME/Applications/Wine athei/wine/bin/wine"`, with
    `WINEDLLOVERRIDES="mscoree,mshtml="` set. (The installed prefix was made
    with Wine 8 and then updated by athei; a new prefix made with athei is
    not tested yet.)
 2. Put the GOG game in `~/Games/Commandos Behind Enemy Lines/Original Game Files`.
 3. Make the prefix:
-   `WINEPREFIX="$HOME/Games/Commandos Behind Enemy Lines/wine-11-athei/wineprefix" wine wineboot -i`.
-4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/commandos-behind-enemy-lines/wine-11-athei/prefix.reg`.
+   `WINEPREFIX="$HOME/Games/Commandos Behind Enemy Lines/other-versions/wine-11-athei/wineprefix" wine wineboot -i`.
+4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/commandos-behind-enemy-lines/other-versions/wine-11-athei/prefix.reg`.
    It sets `ddraw=native,builtin`, the Direct3D renderer `gl`, and the Mac
    keys (Command as Ctrl, Option as Alt).
 5. Put cnc-ddraw's `ddraw.dll` into `<prefix>/drive_c/windows/syswow64`.
 6. Make `<prefix>/drive_c/GOG Games/Commandos` and copy the Wine-only files
    above from the GOG install into it, except `ddraw.ini`: put that one in
-   `wine-11-athei/Settings/` (and set `fullscreen=true` in it).
+   `other-versions/wine-11-athei/Settings/` (and set `fullscreen=true` in it).
 7. Patch Miles:
    `common/wine/patch-miles.py "<prefix>/drive_c/GOG Games/Commandos/MSS32.DLL"`.
 8. Make the app:
-   `common/wine/make-app.sh games/commandos-behind-enemy-lines/wine-11-athei/app "$HOME/Games/Commandos Behind Enemy Lines/wine-11-athei" "$HOME/Games/Commandos Behind Enemy Lines/Original Game Files/goggame-1207662193.ico"`.
+   `common/wine/make-app.sh games/commandos-behind-enemy-lines/other-versions/wine-11-athei/app "$HOME/Games/Commandos Behind Enemy Lines/other-versions/wine-11-athei" "$HOME/Games/Commandos Behind Enemy Lines/Original Game Files/goggame-1207662193.ico"`.
 9. Start the app. Start it before any other Wine program in this prefix:
    it sets the save folder link first, else the game writes its saves
    into the Mac Documents folder (this happened once, on 2026-10-05).

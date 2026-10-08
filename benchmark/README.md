@@ -8,7 +8,8 @@ results of different days can be compared. They compare:
 - `athei`: the athei CrossOver 26.3 Wine with x87sidecar and `qos.dylib`
   (the default Wine, see [`common/wine`](../common/wine/README.md)), with the
   `wine-11-athei` prefix.
-- `native`: our native ports (the installed `native-mac/<Game> (Native).app`
+- `native`: our native ports (the installed `native-mac/<Game> (Native).app`,
+  Generals: `other-versions/native-mac/`
   of each game). The GeneralsX app is not part of the benchmark.
 
 ## Rules

@@ -4,8 +4,8 @@ Zero Hour runs natively on Apple Silicon with a community port that is
 built on the source code that EA released. It is not our port: this folder
 holds only the notes to install and update it, and the local changes that
 we make to it. It needs no Wine, no Rosetta, and no Origin. For the Windows
-version on Wine (the reference), see [../wine-11-athei](../wine-11-athei/README.md).
-Our own native port of the original exe is in [../native-mac](../native-mac/README.md).
+version on Wine (the reference), see [../other-versions/wine-11-athei](../other-versions/wine-11-athei/README.md).
+Our own native port of the original exe is in [../other-versions/native-mac](../other-versions/native-mac/README.md).
 
 ## Source of the app
 
@@ -95,8 +95,8 @@ later), not the MIT license of this repository.
    `../wine-11-athei/save-fix/`).
 5. The original Porting Kit (Wine) version went to the Trash on 2026-10-03.
    On 2026-10-05 the user asked for a Wine version again, to compare with the
-   native app when a problem occurs. It is in `wine-11-athei/` and
-   `wine-8/` (see "Wine version" below).
+   native app when a problem occurs. It is in `other-versions/wine-11-athei/` and
+   `other-versions/wine-8/` (see "Wine version" below).
 6. Windows files (rule of 2026-10-05, for all games in `~/Games`): a file
    that no app uses goes to the Trash. A file that a native app needs stays
    in `Original Game Files`. A file that only the Wine version needs goes
@@ -112,7 +112,7 @@ later), not the MIT license of this repository.
 
 ## Wine version (for comparison)
 
-See [../wine-11-athei/README.md](../wine-11-athei/README.md).
+See [../other-versions/wine-11-athei/README.md](../other-versions/wine-11-athei/README.md).
 
 ## Paths that we cannot change (fixed in the compiled app)
 

@@ -4,14 +4,14 @@ A native arm64 macOS build of Zero Hour made the same way as our Commandos
 and Revenant ports: the game's own x86 program (`game.dat`, patch 1.04) is
 statically recompiled to arm64 with [M-HT/SR](https://github.com/M-HT/SR),
 and the shared native layer in
-[`../../../common/native-mac/runtime`](../../../common/native-mac/README.md)
+[`../../../../common/native-mac/runtime`](../../../../common/native-mac/README.md)
 replaces the Windows APIs. It uses no Wine, no Rosetta and no source code of
 the game. Direct3D 8 goes to DXVK (Direct3D to Vulkan) and MoltenVK (Vulkan
 to Metal), both native arm64 libraries.
 
 It started as a pilot (done 2026-10-07); the record of the work (time,
 problems, "source assists") is in [`PILOT-LOG.md`](PILOT-LOG.md). The
-community port GeneralsX is in [`../open-source-port`](../open-source-port/README.md).
+community port GeneralsX is in [`../../open-source-port`](../../open-source-port/README.md).
 
 Game data is not included. This repository never contains game files or
 code generated from them.
@@ -48,7 +48,7 @@ Known problems:
    `Command & Conquer Generals Zero Hour (Native).app`.
 
 My Documents (options, maps, replays, the DXVK shader cache) is
-`native-mac/Settings/` of the game folder, and the saves are the shared
+`other-versions/native-mac/Settings/` of the game folder, and the saves are the shared
 `Saves/Zero Hour/` (`GAME_PATH_REDIRECTS` in `runtime/game.h`). The save
 format is the one of the Windows version (the same exe), so the Wine
 versions use the same saves. This port also loads saves of the community
@@ -66,14 +66,14 @@ the options menu. Later starts skip the test.
 From the repository root (once): `conda env create -f environment.yml`
 (FFmpeg for Bink is in it), `. common/native-mac/tools/env.sh`,
 `common/native-mac/tools/install-ldc.sh`. The DXVK headers and libraries
-come from the community port build (`../open-source-port/make-app.sh`). Then:
+come from the community port build (`../../open-source-port/make-app.sh`). Then:
 
 ```sh
-cd games/command-and-conquer-generals-zero-hour/native-mac
-. ../../../common/native-mac/tools/env.sh
+cd games/command-and-conquer-generals-zero-hour/other-versions/native-mac
+. ../../../../common/native-mac/tools/env.sh
 make tools                       # once for all games
 make                             # reads game.dat from the Wine game folder; about 10 minutes
-../../../common/native-mac/macos/make-bundle.sh   # build/Command & Conquer Generals Zero Hour (Native).app
+../../../../common/native-mac/macos/make-bundle.sh   # build/Command & Conquer Generals Zero Hour (Native).app
 ```
 
 The app is about 150 MB: FFmpeg from conda brings its dependencies.
@@ -144,6 +144,6 @@ stops for another file):
 - M-HT/SR: Copyright (C) Roman Pauer, MIT license.
 - DXVK (zlib license) and MoltenVK (Apache 2.0) come from the community port
   build; FFmpeg (LGPL 2.1 or later) comes from conda-forge.
-- The files in this folder: MIT license (see [LICENSE](../../../LICENSE)).
+- The files in this folder: MIT license (see [LICENSE](../../../../LICENSE)).
 - *Command & Conquer Generals Zero Hour* is a game by Electronic Arts. You
   need your own copy.

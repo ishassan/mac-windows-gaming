@@ -9,8 +9,8 @@
 #                                        Zero Hour (shared)
 #   <game folder>/Saves/Zero Hour/       Zero Hour saves (shared with our native port)
 #   <game folder>/Saves/Generals/        base-game saves
-#   <game folder>/<version>/<this app>
-#   <game folder>/<version>/wineprefix/  the Wine prefix:
+#   <game folder>/other-versions/<version>/<this app>
+#   <game folder>/other-versions/<version>/wineprefix/  the Wine prefix:
 #     C:\EA Games\Command and Conquer Generals and
 #     C:\EA Games\Command and Conquer Generals Zero Hour are real folders
 #     with the Windows files that only Wine can use (game.dat, the DLLs,
@@ -18,7 +18,7 @@
 #     online and patch files) and a link to each item in the matching
 #     Original Game Files folder. The EA Games registry keys are set,
 #     Direct3D renderer is gl.
-#   <game folder>/<version>/Settings/    My Documents: the options, maps and
+#   <game folder>/other-versions/<version>/Settings/    My Documents: the options, maps and
 #                                        replays of this version; the two
 #                                        Save folders are links to Saves.
 # It starts game.dat, the game program. Generals.exe (the EA app launcher,
@@ -26,7 +26,10 @@
 
 APP="$(cd "$(dirname "$0")/../.." && pwd)"
 VERSION_DIR="$(dirname "$APP")"
+# The game folder is the nearest folder above with "Original Game Files": the main
+# version is at the top of the game folder, the other versions are in other-versions/.
 GAME_ROOT="$(dirname "$VERSION_DIR")"
+while [ ! -d "$GAME_ROOT/Original Game Files" ] && [ "$GAME_ROOT" != / ]; do GAME_ROOT="$(dirname "$GAME_ROOT")"; done
 BASE_DIR="$GAME_ROOT/Original Game Files/Command and Conquer Generals"
 ZH_DIR="$GAME_ROOT/Original Game Files/Command and Conquer Generals Zero Hour"
 SAVES="$GAME_ROOT/Saves"

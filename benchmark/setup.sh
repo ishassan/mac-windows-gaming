@@ -7,7 +7,8 @@
 # Usage: benchmark/setup.sh [work folder]   (default: see BENCH_WORK below)
 #
 # Needs: the layout of ~/Games/README.md (Original Game Files, Saves, and the
-# version folders native-mac, wine-11-athei, wine-8), and i686-w64-mingw32-gcc
+# version folders native-mac, wine-11-athei, wine-8; the main version at the
+# top, the others in other-versions/), and i686-w64-mingw32-gcc
 # (Homebrew mingw-w64) for the in-Wine input helpers.
 set -euo pipefail
 
@@ -17,10 +18,16 @@ G="$HOME/Games"
 CMD="Commandos Behind Enemy Lines"
 REV="Revenant"
 GEN="Command and Conquer Generals Zero Hour"
+# vd <game> <version>: the folder of a version, relative to ~/Games. The main
+# version (native-mac; Generals: open-source-port) is at the top of the game
+# folder, the others are in other-versions/.
+vd() {
+    if [ "$2" = native-mac ] && [ "$1" != "$GEN" ]; then echo "$1/$2"; else echo "$1/other-versions/$2"; fi
+}
 
 for g in "$CMD" "$REV" "$GEN"; do
     for v in wine-11-athei wine-8; do
-        [ -d "$G/$g/$v/wineprefix" ] || { echo "not found: $G/$g/$v/wineprefix" >&2; exit 1; }
+        [ -d "$G/$(vd "$g" $v)/wineprefix" ] || { echo "not found: $G/$(vd "$g" $v)/wineprefix" >&2; exit 1; }
     done
 done
 command -v i686-w64-mingw32-gcc >/dev/null || { echo "i686-w64-mingw32-gcc not found (brew install mingw-w64)" >&2; exit 1; }
@@ -39,24 +46,24 @@ python3 "$HERE/relink.py" "$WORK"
 # Revenant: full screen (the installed value is a window).
 ZH="Command and Conquer Generals Zero Hour Data"
 for v in wine-8 native-mac; do
-    mkdir -p "$WORK/$GEN/$v/Settings/$ZH"
-    cp "$WORK/$GEN/wine-11-athei/Settings/$ZH/Options.ini" "$WORK/$GEN/$v/Settings/$ZH/Options.ini"
-    mkdir -p "$WORK/$REV/$v/Settings"
-    cp "$WORK/$REV/wine-11-athei/Settings/revenant.ini" "$WORK/$REV/$v/Settings/revenant.ini"
+    mkdir -p "$WORK/$(vd "$GEN" $v)/Settings/$ZH"
+    cp "$WORK/$(vd "$GEN" wine-11-athei)/Settings/$ZH/Options.ini" "$WORK/$(vd "$GEN" $v)/Settings/$ZH/Options.ini"
+    mkdir -p "$WORK/$(vd "$REV" $v)/Settings"
+    cp "$WORK/$(vd "$REV" wine-11-athei)/Settings/revenant.ini" "$WORK/$(vd "$REV" $v)/Settings/revenant.ini"
 done
-cp "$WORK/$CMD/wine-11-athei/Settings/ddraw.ini" "$WORK/$CMD/wine-8/Settings/ddraw.ini"
+cp "$WORK/$(vd "$CMD" wine-11-athei)/Settings/ddraw.ini" "$WORK/$(vd "$CMD" wine-8)/Settings/ddraw.ini"
 for v in wine-11-athei wine-8 native-mac; do
-    perl -pi -e 's/^Windowed=Yes(\r?)$/Windowed=No$1/' "$WORK/$REV/$v/Settings/revenant.ini"
+    perl -pi -e 's/^Windowed=Yes(\r?)$/Windowed=No$1/' "$WORK/$(vd "$REV" $v)/Settings/revenant.ini"
 done
 
 # In-Wine input helpers and the scripts, in the Wine game folders.
 i686-w64-mingw32-gcc -O2 -o "$WORK/cinput.exe" "$HERE/helpers/cinput.c"
 i686-w64-mingw32-gcc -O2 -o "$WORK/input.exe" "$HERE/helpers/input.c"
 for v in wine-11-athei wine-8; do
-    C="$WORK/$CMD/$v/wineprefix/drive_c/GOG Games/Commandos"
+    C="$WORK/$(vd "$CMD" $v)/wineprefix/drive_c/GOG Games/Commandos"
     cp "$WORK/cinput.exe" "$C/cinput.exe"
     cp "$HERE/scripts/commandos.txt" "$C/bench-script.txt"
-    R="$WORK/$REV/$v/wineprefix/drive_c/Revenant"
+    R="$WORK/$(vd "$REV" $v)/wineprefix/drive_c/Revenant"
     cp "$WORK/input.exe" "$R/input.exe"
     cp "$HERE/scripts/revenant.txt" "$R/bench-script.txt"
 done

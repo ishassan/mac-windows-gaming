@@ -29,6 +29,8 @@ COMMON := ../../../common/native-mac
 include $(COMMON)/mk/game.mk
 ```
 
+(A port in `other-versions/`, such as Generals: `COMMON := ../../../../common/native-mac`.)
+
 `game.conf` (KEY=value) gives `GAME_NAME` (program name), `GAME_EXE` (exe in
 the game folder), `GAME_EXE_SHA256` (the exe version that the port supports:
 the build stops for another version, because the fixes in `srw/` use fixed

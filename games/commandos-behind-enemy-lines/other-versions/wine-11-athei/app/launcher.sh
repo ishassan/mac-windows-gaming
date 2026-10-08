@@ -7,10 +7,10 @@
 # Layout (~/Games/README.md):
 #   Commandos Behind Enemy Lines/Original Game Files/   the game (shared)
 #   Commandos Behind Enemy Lines/Saves/                 saves and game options (shared)
-#   Commandos Behind Enemy Lines/<version>/<this app>
-#   Commandos Behind Enemy Lines/<version>/wineprefix/  the Wine prefix
+#   Commandos Behind Enemy Lines/other-versions/<version>/<this app>
+#   Commandos Behind Enemy Lines/other-versions/<version>/wineprefix/  the Wine prefix
 #     (cnc-ddraw ddraw.dll is in syswow64)
-#   Commandos Behind Enemy Lines/<version>/Settings/ddraw.ini   cnc-ddraw settings
+#   Commandos Behind Enemy Lines/other-versions/<version>/Settings/ddraw.ini   cnc-ddraw settings
 # C:\GOG Games\Commandos (wineprefix/drive_c/GOG Games/Commandos) is a real
 # folder with the files that only Wine needs, and a link to each item in
 # Original Game Files:
@@ -25,7 +25,10 @@
 
 APP="$(cd "$(dirname "$0")/../.." && pwd)"
 VERSION_DIR="$(dirname "$APP")"
+# The game folder is the nearest folder above with "Original Game Files": the main
+# version is at the top of the game folder, the other versions are in other-versions/.
 GAME_ROOT="$(dirname "$VERSION_DIR")"
+while [ ! -d "$GAME_ROOT/Original Game Files" ] && [ "$GAME_ROOT" != / ]; do GAME_ROOT="$(dirname "$GAME_ROOT")"; done
 GAME_FILES="$GAME_ROOT/Original Game Files"
 SAVES="$GAME_ROOT/Saves"
 SETTINGS="$VERSION_DIR/Settings"

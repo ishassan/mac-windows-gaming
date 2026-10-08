@@ -11,7 +11,7 @@
 # format the bytes 2 and 3 are zero. A 4-byte string is read with the
 # original xferUser (so a short file still gives the game's read error) and
 # changed in place to 2-byte characters (above 0xFFFF: '?').
-# Same rule as games/command-and-conquer-generals-zero-hour/native-mac/runtime/llasm/xfer-unicode.c.
+# Same rule as games/command-and-conquer-generals-zero-hour/other-versions/native-mac/runtime/llasm/xfer-unicode.c.
 #
 # Entry: ecx = XferLoad, [esp+4] = buffer, [esp+8] = 2 * length. Exit: ret 8,
 # as xferUser. Variables in the free bytes of .data1: 0xA70F00 last FILE,

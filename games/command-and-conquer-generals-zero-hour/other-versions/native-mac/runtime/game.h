@@ -12,17 +12,17 @@
 #define GAME_MODULE_PATH  "C:\\game.dat"
 #define GAME_DATA_DEFAULT "Games/Command and Conquer Generals Zero Hour/Original Game Files/Command and Conquer Generals Zero Hour"
 #define GAME_DATA_CHECK   "INIZH.big"
-#define GAME_CONFIG_FILE  "../../native-mac/Settings/GeneralsZH-native.cfg"
+#define GAME_CONFIG_FILE  "../../other-versions/native-mac/Settings/GeneralsZH-native.cfg"
 /* Layout of the game folder (~/Games/README.md): the game folder of the
  * runtime is the Zero Hour folder in Original Game Files. "My Documents"
- * (options, maps, replays) is native-mac/Settings, and the saves are the
- * shared Saves/Zero Hour (the same saves as the Wine versions; GeneralsX
- * saves do not load in this exe). GENERALSZH_DOCUMENTS=<folder> gives
+ * (options, maps, replays) is other-versions/native-mac/Settings, and the
+ * saves are the shared Saves/Zero Hour (the same saves as all other
+ * versions). GENERALSZH_DOCUMENTS=<folder> gives
  * another My Documents (the saves are then in its own Save folder). */
-#define GAME_DOCUMENTS_PATH "C:\\..\\..\\native-mac\\Settings"
+#define GAME_DOCUMENTS_PATH "C:\\..\\..\\other-versions\\native-mac\\Settings"
 #define GAME_PATH_REDIRECTS \
-    "../../native-mac/Settings/Command and Conquer Generals Zero Hour Data/Save", "../../Saves/Zero Hour"
-/* The registry keys of the EA install (as in wine-11-athei/prefix.reg). The base game
+    "../../other-versions/native-mac/Settings/Command and Conquer Generals Zero Hour Data/Save", "../../Saves/Zero Hour"
+/* The registry keys of the EA install (as in other-versions/wine-11-athei/prefix.reg). The base game
  * files are in the folder next to the Zero Hour folder. */
 #define GAME_REGISTRY_VALUES \
     { "HKLM\\Software\\Electronic Arts\\EA Games\\Generals", "InstallPath", 1, "C:\\..\\Command and Conquer Generals\\" }, \

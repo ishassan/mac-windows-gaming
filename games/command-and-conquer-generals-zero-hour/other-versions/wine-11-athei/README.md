@@ -2,11 +2,11 @@
 
 The original Windows Zero Hour (the EA app / Origin copy) on Wine.
 It is a reference for the native apps ([../native-mac](../native-mac/README.md),
-[../open-source-port](../open-source-port/README.md)). This folder is for the
+[../../open-source-port](../../open-source-port/README.md)). This folder is for the
 athei Wine (the default); [../wine-8](../wine-8/README.md) is the same setup
 on Wine 8.
 The parts that all Wine versions share (Wine, folder layout, test methods)
-are in [../../../common/wine](../../../common/wine/README.md).
+are in [../../../../common/wine](../../../../common/wine/README.md).
 
 ## Files here
 
@@ -96,7 +96,7 @@ These steps repeat the result of the prefix of 2026-10-05 (the files and
 the settings in it), not a recorded command history.
 
 1. Install Wine: `common/wine/install-athei.sh` (the athei CrossOver 26.3
-   build, see [`common/wine`](../../../common/wine/README.md)). In the steps
+   build, see [`common/wine`](../../../../common/wine/README.md)). In the steps
    below, `wine` is `"$HOME/Applications/Wine athei/wine/bin/wine"`, with
    `WINEDLLOVERRIDES="mscoree,mshtml="` set. (The installed prefix was made
    with Wine 8 and then updated by athei; a new prefix made with athei is
@@ -105,8 +105,8 @@ the settings in it), not a recorded command history.
 2. Put the `.big` files of the base game and Zero Hour in the two
    `Original Game Files` folders (the native apps need them too).
 3. Make the prefix:
-   `WINEPREFIX="$HOME/Games/Command and Conquer Generals Zero Hour/wine-11-athei/wineprefix" wine wineboot -i`.
-4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/command-and-conquer-generals-zero-hour/wine-11-athei/prefix.reg`.
+   `WINEPREFIX="$HOME/Games/Command and Conquer Generals Zero Hour/other-versions/wine-11-athei/wineprefix" wine wineboot -i`.
+4. Settings (with the same `WINEPREFIX`): `wine regedit /S games/command-and-conquer-generals-zero-hour/other-versions/wine-11-athei/prefix.reg`.
    It sets the two EA Games keys above, the Direct3D renderer `gl`,
    `LeftCommandIsCtrl` and `EmulateModeset` (full screen on athei).
 5. Make the two Wine game folders under `<prefix>/drive_c/EA Games` and copy
@@ -115,7 +115,7 @@ the settings in it), not a recorded command history.
    `WINE` set to the athei `wine`; done with Wine 8 on 2026-10-05, not
    tested with athei).
 7. Make the app:
-   `common/wine/make-app.sh games/command-and-conquer-generals-zero-hour/wine-11-athei/app "$HOME/Games/Command and Conquer Generals Zero Hour/wine-11-athei" "<Zero Hour Wine game folder>/GeneralsZH.ico"`.
+   `common/wine/make-app.sh games/command-and-conquer-generals-zero-hour/other-versions/wine-11-athei/app "$HOME/Games/Command and Conquer Generals Zero Hour/other-versions/wine-11-athei" "<Zero Hour Wine game folder>/GeneralsZH.ico"`.
 8. Start the app. It sets the My Documents and Save links and adds the
    links to `Original Game Files` before it starts the game.
 
