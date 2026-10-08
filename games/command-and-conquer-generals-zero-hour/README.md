@@ -15,4 +15,5 @@ Other versions, kept to test and to compare when there is a problem:
 
 All 4 versions read the same saves (`~/Games/Command and Conquer Generals Zero
 Hour/Saves/Zero Hour`). Known problem: in the Wine versions, one old save
-from 2024 does not load (see [other-versions/wine-11-athei](other-versions/wine-11-athei/README.md)).
+from 2024 did not load with the first save fix; the fix of 2026-10-09 is not
+tested yet on Wine (see [other-versions/wine-11-athei](other-versions/wine-11-athei/README.md)).

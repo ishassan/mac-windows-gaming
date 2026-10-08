@@ -20,8 +20,10 @@ Usage: patch-game-dat.py <game.dat> [<game.dat> ...]
 - The first run keeps the original file as game.dat.orig (it never
   overwrites an existing .orig). The native build reads game.dat.orig when
   it is there (common/native-mac/mk/game.mk).
-- A file that is already patched is not changed. Another game.dat version
-  stops the script.
+- A file that is already patched is not changed. A file with an older
+  version of this patch gets the new code (from 2026-10-09: the width is
+  guessed only at the save description, see xfer-unicode.s). Another
+  game.dat version stops the script.
 """
 import hashlib
 import os
@@ -72,13 +74,23 @@ def patch(path, cave):
     sec = sections(data)
     text, data1 = sec[".text"], sec[".data1"]
     call_at = CALL_SITE - text["va"] + text["rawptr"]
-    if data[call_at:call_at + 5] == b"\xe8" + struct.pack("<i", CAVE - (CALL_SITE + 5)):
-        print(f"{path}: already patched (sha256 {before})")
+    cave_at = CAVE - text["va"] + text["rawptr"]
+    cave_end_at = CAVE_END - text["va"] + text["rawptr"]
+    call = b"\xe8" + struct.pack("<i", CAVE - (CALL_SITE + 5))
+    if data[call_at:call_at + 5] == call:
+        if data[cave_at:cave_at + len(cave)] == cave and not any(data[cave_at + len(cave):cave_end_at]):
+            print(f"{path}: already patched (sha256 {before})")
+            return
+        # An older version of this patch: put the new code in place of the old code.
+        data[cave_at:cave_end_at] = bytes(cave_end_at - cave_at)
+        data[cave_at:cave_at + len(cave)] = cave
+        struct.pack_into("<I", data, text["header"] + 8, max(text["vsize"], CAVE + len(cave) - text["va"]))
+        open(path, "wb").write(data)
+        print(f"{path}: patch updated (sha256 {before} -> {sha256(data)})")
         return
     if before != ORIGINAL_SHA256:
         sys.exit(f"{path}: not game.dat 1.04 (sha256 {before}); nothing changed")
-    cave_at = CAVE - text["va"] + text["rawptr"]
-    if CAVE + len(cave) > CAVE_END or any(data[cave_at:cave_at + len(cave)]):
+    if CAVE + len(cave) > CAVE_END or any(data[cave_at:cave_end_at]):
         sys.exit(f"{path}: the free bytes at 0x{CAVE:X} are not free; nothing changed")
     if data[call_at:call_at + 6] != CALL_BYTES:
         sys.exit(f"{path}: unexpected bytes at 0x{CALL_SITE:X}; nothing changed")
@@ -87,7 +99,7 @@ def patch(path, cave):
     if not os.path.exists(orig):
         shutil.copy2(path, orig)
     data[cave_at:cave_at + len(cave)] = cave
-    data[call_at:call_at + 6] = b"\xe8" + struct.pack("<i", CAVE - (CALL_SITE + 5)) + b"\x90"
+    data[call_at:call_at + 6] = call + b"\x90"
     struct.pack_into("<I", data, text["header"] + 8, max(text["vsize"], CAVE + len(cave) - text["va"]))
     struct.pack_into("<I", data, data1["header"] + 8, max(data1["vsize"], DATA1_VSIZE))
     open(path, "wb").write(data)

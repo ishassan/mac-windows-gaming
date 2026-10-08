@@ -50,11 +50,22 @@ are in [../../../../common/wine](../../../../common/wine/README.md).
   2026-10-08, and the original `game.dat` read only 2. `save-fix/patch-game-dat.py`
   changes the Zero Hour `game.dat` of a prefix so that it reads both (it
   keeps the original as `game.dat.orig`; see the script for the details).
-  Applied to the `wine-11-athei` and `wine-8` prefixes on 2026-10-08.
-  Tested by hand on both: the load list shows readable names, and the
-  newest GeneralsX save loads. Known problem: the old 2024 Windows save
-  `00000010.sav` gives "Error loading game"; it is not known yet whether it
-  loaded before the patch.
+  It guesses the width of a save at its description (the first text of a
+  save, before offset 0x200) and keeps that width for the other texts of
+  the same file. Applied to the `wine-11-athei` and `wine-8` prefixes on
+  2026-10-08: the load list showed readable names, and the newest GeneralsX
+  save loaded. Known problem of that first version: the old 2024 Windows
+  save `00000010.sav` gave "Error loading game". That version guessed the
+  width again when the game read another file between two texts of a save,
+  or when the position went back. Then a short text in the middle of a
+  2-byte save can look like 4-byte text (a 1-character text followed by
+  zero bytes). The version of 2026-10-09 does not guess in the middle of a
+  save, and it keeps the width of two files at the same time;
+  `save-fix/test/test.py` shows the old and the new behavior with
+  synthetic files. Not tested yet with the real game on Wine: run the
+  script again on both `game.dat` files (it replaces the old code), then
+  load `00000010.sav`. If it still fails, load it once with
+  `game.dat.orig`: if that also fails, the save itself does not load.
 - The base game (without Zero Hour) can also run on Wine: its `game.dat` is
   in the base Wine game folder. There is no app for it.
 

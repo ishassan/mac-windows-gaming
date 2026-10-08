@@ -103,11 +103,17 @@ stops for another file):
   for each character before 2026-10-08 (wchar_t on macOS), so its saves gave
   "Error loading game". `srw/llasm/instruction_replacements.sci` changes the
   read call at `0x602139` into a call of `runtime/llasm/xfer-unicode.c`,
-  which finds the width of each file at its first text (as the GeneralsX
-  reader does) and gives the game 2-byte characters. Tested 2026-10-08: the
-  load list shows the real names of the GeneralsX saves, and the newest one
-  loads. The text width was the only difference in that save. The game
-  still writes 2 bytes for each character.
+  which guesses the width of a file at its save description (the first
+  text, before offset 0x200), keeps it for the other texts of that file
+  (two files at the same time), and gives the game 2-byte characters. The
+  same rule as the Wine fix (`../wine-11-athei/save-fix/`); see the comment
+  in `xfer-unicode.c`. Tested 2026-10-08 (first version): the load list
+  shows the real names of the GeneralsX saves, and the newest one loads.
+  The text width was the only difference in that save. The game still
+  writes 2 bytes for each character. `GENERALSZH_TRACE_XFERU=1` writes one
+  line for each text of a save on stderr (file, position, width, guess or
+  kept width); `GENERALSZH_XFERU=orig` uses only the original reader (for
+  tests).
 - `srw/data_in_text.txt`: the DirectInput keyboard data format at
   `0x7d7730` is in `.text`.
 - `srw/llasm/instruction_replacements.sci`: four `cmp [list], list` checks,

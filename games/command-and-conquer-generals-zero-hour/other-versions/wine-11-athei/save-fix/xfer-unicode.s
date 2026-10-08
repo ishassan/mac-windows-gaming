@@ -6,55 +6,80 @@
 # for each character, as wchar_t on Windows. GeneralsX wrote 4 bytes for each
 # character before 2026-10-08 (wchar_t on macOS). patch-game-dat.py puts this
 # code into the free bytes at the end of .text (0x938DF0) and changes that call
-# into "call 0x938DF0". The code finds the width once for each file, at its
-# first string with characters, as the GeneralsX reader does: in the 4-byte
-# format the bytes 2 and 3 are zero. A 4-byte string is read with the
-# original xferUser (so a short file still gives the game's read error) and
-# changed in place to 2-byte characters (above 0xFFFF: '?').
+# into "call 0x938DF0". A 4-byte string is read with the original xferUser (so
+# a short file still gives the game's read error) and changed in place to
+# 2-byte characters (above 0xFFFF: '?').
+#
+# The width of a file is guessed at its save description, the first string of
+# a save, as the GeneralsX reader does: in the 4-byte format the bytes 2 and 3
+# are zero. The description starts before 0x200 (0x2B, or 0x45 in a "Mission
+# Start" save); all other strings start after the map data of the save, far
+# after 0x200. So: a guess for each string that starts before 0x200, and for
+# the first string of a FILE that has no width yet. All other strings keep the
+# width of their FILE. Two FILEs keep a width at the same time, so the read
+# of another save while a save loads does not change the width of the first.
+# (The rule before 2026-10-09 guessed again at each change of FILE and at each
+# position that was not above the last one: then a short string in the middle
+# of a 2-byte save could look like 4-byte text.)
 # Same rule as games/command-and-conquer-generals-zero-hour/other-versions/native-mac/runtime/llasm/xfer-unicode.c.
 #
 # Entry: ecx = XferLoad, [esp+4] = buffer, [esp+8] = 2 * length. Exit: ret 8,
-# as xferUser. Variables in the free bytes of .data1: 0xA70F00 last FILE,
-# 0xA70F04 last position, 0xA70F08 width flag (1: 4 bytes).
+# as xferUser. Variables in the free bytes of .data1 (0xA70F00): two slots of
+# FILE and width flag (1: 4 bytes) at +0 and +8, and at +0x10 the address of
+# the slot of the last call.
 
         .intel_syntax noprefix
         .text
         .globl start
+        .set SLOTS, 0xA70F00
+        .set LAST, 0xA70F10
 start:
         push ebp
         mov ebp, esp
         push ebx
         push esi
         push edi
-        sub esp, 12                      # [ebp-16] probe (4 bytes), [ebp-20] position, [ebp-24] count
+        push 0                           # [ebp-16] probe (4 bytes), [ebp-20] position, [ebp-24] count
+        push eax
+        push eax
         mov esi, ecx                     # this
         mov edi, [ebp+8]                 # buffer
         mov ebx, [ebp+12]                # 2 * length
         test ebx, ebx
         jz plain
-
         mov eax, [esi+0x10]              # m_fileFP
         test eax, eax
         jz plain
         push eax
         call dword ptr [0x93945C]        # ftell
-        add esp, 4
+        pop ecx
         mov [ebp-20], eax
         test eax, eax
         js plain
-        mov edx, [esi+0x10]
-        cmp edx, dword ptr [0xA70F00]
-        jne decide
-        cmp eax, dword ptr [0xA70F04]
-        jg known
-decide:
-        mov dword ptr [0xA70F00], edx
-        mov dword ptr [ebp-16], 0
-        push edx                         # fread(&probe, 1, 4, fp)
+
+        mov ecx, [esi+0x10]              # the slot of this FILE
+        mov edx, SLOTS
+        cmp ecx, [edx]
+        je found
+        add edx, 8
+        cmp ecx, [edx]
+        je found
+        cmp edx, [LAST]                  # a new FILE: the slot that the last call did not use
+        jne take
+        sub edx, 8
+take:
+        mov [edx], ecx
+        jmp guess
+found:
+        cmp eax, 0x200
+        jae known
+guess:
+        push edx
+        push ecx                         # fread(&probe, 1, 4, fp)
         push 4
         push 1
-        lea ecx, [ebp-16]
-        push ecx
+        lea eax, [ebp-16]
+        push eax
         call dword ptr [0x939460]        # fread
         add esp, 16
         mov [ebp-24], eax                # count (fseek may change ecx)
@@ -63,6 +88,7 @@ decide:
         push dword ptr [esi+0x10]
         call dword ptr [0x939458]        # fseek
         add esp, 12
+        pop edx
         xor eax, eax
         cmp dword ptr [ebp-24], 4
         jne setwidth
@@ -70,11 +96,10 @@ decide:
         jne setwidth
         inc eax
 setwidth:
-        mov dword ptr [0xA70F08], eax
+        mov [edx+4], eax
 known:
-        mov eax, [ebp-20]
-        mov dword ptr [0xA70F04], eax
-        cmp dword ptr [0xA70F08], 0
+        mov [LAST], edx
+        cmp dword ptr [edx+4], 0
         je plain
 
         mov eax, [esi]                   # xferUser(buffer, 4 * length)
