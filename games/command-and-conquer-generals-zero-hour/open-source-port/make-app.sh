@@ -35,7 +35,10 @@ fi
 
 cd "$SRC"
 echo "Source: $(git branch --show-current 2>/dev/null || true) $(git log --oneline -1)"
-[[ -f build/macos-vulkan/build.ninja ]] || cmake --preset macos-vulkan
+# Protobuf off: the conda env has libprotobuf, which clashes with the vcpkg one in the
+# GameNetworkingSockets build ("Some (but not all) targets in this export set were already
+# defined"). The build of 2026-10-06 found no Protobuf, so it had no GameNetworkingSockets.
+[[ -f build/macos-vulkan/build.ninja ]] || cmake --preset macos-vulkan -DCMAKE_DISABLE_FIND_PACKAGE_Protobuf=TRUE
 cmake --build build/macos-vulkan --target z_generals sage_patch -j"$(( ($(sysctl -n hw.logicalcpu) + 1) / 2 ))"
 mkdir -p "$OUT"
 ./scripts/build/macos/bundle-macos-zh.sh > "$OUT/bundle.log" 2>&1 || { tail -20 "$OUT/bundle.log"; exit 1; }

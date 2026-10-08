@@ -122,18 +122,21 @@ $(GEN)/imports.spec: $(SPEC_SRC)
 
 # 1. Translate the exe (SRW) -> build/gen/*.llasm
 # The fixes in srw/ use fixed addresses of one exe version: GAME_EXE_SHA256
-# in game.conf is that version. Another version stops the build here.
+# in game.conf is that version. Another version stops the build here. When
+# the Wine version has a patched exe, the original is next to it as
+# <exe>.orig (for example Generals game.dat.orig): the build reads that one.
 $(B)/srw/$(GAME_EXE):
 	mkdir -p $(B)/srw
-	@sum=$$(shasum -a 256 "$(GAME_DIR)/$(GAME_EXE)" | cut -d' ' -f1); \
+	@src="$(GAME_DIR)/$(GAME_EXE)"; [ -f "$$src.orig" ] && src="$$src.orig"; \
+	sum=$$(shasum -a 256 "$$src" | cut -d' ' -f1); \
 	if [ -n "$(GAME_EXE_SHA256)" ] && [ "$$sum" != "$(GAME_EXE_SHA256)" ]; then \
-	  echo "error: $(GAME_DIR)/$(GAME_EXE) is not the exe version that this port supports." >&2; \
+	  echo "error: $$src is not the exe version that this port supports." >&2; \
 	  echo "  sha256 found:    $$sum" >&2; \
 	  echo "  sha256 expected: $(GAME_EXE_SHA256) (GAME_EXE_SHA256 in game.conf)" >&2; \
 	  echo "  The fixes in srw/ are for that version only (see the README of the game)." >&2; \
 	  exit 1; \
-	fi
-	cp "$(GAME_DIR)/$(GAME_EXE)" $@
+	fi; \
+	cp "$$src" $@
 
 $(GEN)/$(GAME_LLASM).llasm: $(B)/srw/$(GAME_EXE) $(TOOLS)/gen_relocs.py $(TOOLS)/gen_extern.py $(TOOLS)/run-srw.sh \
                             $(wildcard srw/llasm/*.sci) $(wildcard srw/*.txt) srw/SR.cfg $(STAGE)/stamp $(HOSTBIN)/SRW

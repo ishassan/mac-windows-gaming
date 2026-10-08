@@ -51,10 +51,10 @@ My Documents (options, maps, replays, the DXVK shader cache) is
 `native-mac/Settings/` of the game folder, and the saves are the shared
 `Saves/Zero Hour/` (`GAME_PATH_REDIRECTS` in `runtime/game.h`). The save
 format is the one of the Windows version (the same exe), so the Wine
-versions use the same saves. Saves of the community port (GeneralsX) do not
-load in this exe ("Error loading game", tested 2026-10-08), so GeneralsX
-keeps its own saves. Another My Documents: `GENERALSZH_DOCUMENTS` (the saves
-are then in its own `Save` folder).
+versions use the same saves. This port also loads saves of the community
+port GeneralsX that have 4 bytes for each text character (GeneralsX before
+2026-10-08; see "Port notes"). Another My Documents: `GENERALSZH_DOCUMENTS`
+(the saves are then in its own `Save` folder).
 
 The first start (no `Options.ini` yet) takes about one minute with no
 window: the game runs its own speed test (memory copy loops timed with
@@ -98,6 +98,16 @@ Environment variables (prefix `GENERALSZH_`):
 These are for the EA app `game.dat` 1.04 (sha256 in `game.conf`; the build
 stops for another file):
 
+- Save files: `XferLoad::xferUnicodeString` (`0x602110`) reads 2 bytes for
+  each character of a text (wchar_t on Windows). GeneralsX wrote 4 bytes
+  for each character before 2026-10-08 (wchar_t on macOS), so its saves gave
+  "Error loading game". `srw/llasm/instruction_replacements.sci` changes the
+  read call at `0x602139` into a call of `runtime/llasm/xfer-unicode.c`,
+  which finds the width of each file at its first text (as the GeneralsX
+  reader does) and gives the game 2-byte characters. Tested 2026-10-08: the
+  load list shows the real names of the GeneralsX saves, and the newest one
+  loads. The text width was the only difference in that save. The game
+  still writes 2 bytes for each character.
 - `srw/data_in_text.txt`: the DirectInput keyboard data format at
   `0x7d7730` is in `.text`.
 - `srw/llasm/instruction_replacements.sci`: four `cmp [list], list` checks,

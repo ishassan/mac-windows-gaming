@@ -46,10 +46,11 @@ later), not the MIT license of this repository.
   installed, as the official release does. The bundle step copies them into
   the app, so the app itself does not need Homebrew.
 - The app that is installed now is the build of branch `custom`, fork commit
-  `a692659` (with the save fix), installed 2026-10-06, with steps 4 and 5
-  of 2026-10-08 applied to the installed app. The build before it
-  (`5f02335`) went to the Trash on 2026-10-08, and the downloaded 1.0.2 app
-  on 2026-10-06.
+  `4c33825` (the save fix, now also for writing), built with `make-app.sh`
+  and installed 2026-10-08. The build before it (`a692659`) is in
+  `~/Library/Caches/games-reorg-backup-2026-10-08`. The build `5f02335`
+  went to the Trash on 2026-10-08, and the downloaded 1.0.2 app on
+  2026-10-06.
 - The build step also makes the app self-contained: it points MoltenVK at the
   C++ library of macOS and removes the paths to build folders from every
   file. Without this, the app loaded `libc++` from the conda env.
@@ -61,11 +62,11 @@ later), not the MIT license of this repository.
 ├── Original Game Files
 │   ├── Command and Conquer Generals             base game files (.big)
 │   └── Command and Conquer Generals Zero Hour   Zero Hour files (.big)
-├── Saves                     saves of the original exe (Wine and our native port)
+├── Saves                     saves of all versions (Wine, our native port, this app)
 ├── open-source-port
 │   ├── Command & Conquer Generals Zero Hour.app   this app (double-click to play)
 │   └── Settings              ~/Library/Application Support/GeneralsX is a link to it
-│       ├── GeneralsZH        Options.ini, SagePatch.ini, Save/ (the saves of this app)
+│       ├── GeneralsZH        Options.ini, SagePatch.ini, Save → ../../../Saves/Zero Hour
 │       ├── registry.ini
 │       ├── fontconfig-cache
 │       └── Command and Conquer Generals Zero Hour.dxvk-cache, ..._d3d9.log
@@ -85,9 +86,13 @@ later), not the MIT license of this repository.
 4. Settings and saves of this app are in `open-source-port/Settings`. The app
    always uses `~/Library/Application Support/GeneralsX`, and we cannot
    change this path. That path is a link to `open-source-port/Settings`.
-   The saves stay there, not in the shared `Saves`: a save made by this app
-   gives "Error loading game" in the original exe (tested 2026-10-08 with our
-   native port of the exe). This app loads the Windows saves (the save fix).
+   Since 2026-10-08 its save folder `GeneralsZH/Save` is a link to the shared
+   `Saves/Zero Hour`. The save fix of branch `fix/load-retail-unicode-saves`
+   makes this app read and write the Windows format (2 bytes for each
+   character of text). Before that, it wrote 4 bytes, and the original exe
+   gave "Error loading game". Our native port and the Wine versions also read
+   those old saves (see `../native-mac/README.md` and
+   `../wine-11-athei/save-fix/`).
 5. The original Porting Kit (Wine) version went to the Trash on 2026-10-03.
    On 2026-10-05 the user asked for a Wine version again, to compare with the
    native app when a problem occurs. It is in `wine-11-athei/` and
@@ -190,11 +195,18 @@ them again, in this order.
    - The process must be native: in `vmmap <pid>`, "Code Type" is ARM64.
    - `lsof -p <pid>` must show `.big` files from `Original Game Files`.
    - Load a save, then save once. The new file must appear in
-     `open-source-port/Settings/GeneralsZH/Save`.
+     `Saves/Zero Hour`, with 2 bytes for each character of its name
+     (`xxd` of the first 0x40 bytes), and our native port must load it.
 6. Update the "Installed version" line in this file.
 
 ## Check log
 
+- 2026-10-08: build of fork commit `4c33825` (writes 2-byte text) tested
+  with a test copy of the settings and saves (`HOME=/tmp/gxhome`): the
+  Windows save "GLA 1" loaded, a new save had 2-byte text, and our native
+  port loaded it (same map, units and money). Installed. Then
+  `GeneralsZH/Save` became a link to `Saves/Zero Hour`; the load list shows
+  all 18 saves.
 - 2026-10-03: 1.0.2 installed and passed the security checks. Started from
   the game folder: native ARM64, reached the main menu, and loaded `.big` files
   from `Game Data`. Not tested yet: a new save written through the

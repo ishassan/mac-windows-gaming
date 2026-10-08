@@ -23,10 +23,10 @@ are in [../../../common/wine](../../../common/wine/README.md).
 │   ├── Command and Conquer Generals             base game files (.big)
 │   └── Command and Conquer Generals Zero Hour   Zero Hour files (.big)
 ├── Saves
-│   ├── Zero Hour                  Zero Hour saves (shared with wine-8 and native-mac)
+│   ├── Zero Hour                  Zero Hour saves (shared by all 4 versions)
 │   └── Generals                   base-game saves
 ├── native-mac                     our native port
-├── open-source-port               GeneralsX (its own saves)
+├── open-source-port               GeneralsX
 ├── wine-11-athei
 │   ├── Command & Conquer Generals Zero Hour (Wine).app
 │   ├── Settings                   My Documents: options, maps, replays; Save → Saves
@@ -45,8 +45,16 @@ are in [../../../common/wine](../../../common/wine/README.md).
   the version. In it, `Command and Conquer Generals Zero Hour Data/Save` is
   a link to `Saves/Zero Hour`, and `Command and Conquer Generals Data/Save`
   a link to `Saves/Generals`. The launcher makes these links before each
-  start. The native port uses the same `Saves/Zero Hour`; GeneralsX keeps
-  its own saves (its saves do not load in `game.dat`).
+  start. The native port and GeneralsX use the same `Saves/Zero Hour`.
+- Save fix: GeneralsX wrote 4 bytes for each character of text before
+  2026-10-08, and the original `game.dat` read only 2. `save-fix/patch-game-dat.py`
+  changes the Zero Hour `game.dat` of a prefix so that it reads both (it
+  keeps the original as `game.dat.orig`; see the script for the details).
+  Applied to the `wine-11-athei` and `wine-8` prefixes on 2026-10-08.
+  Tested by hand on both: the load list shows readable names, and the
+  newest GeneralsX save loads. Known problem: the old 2024 Windows save
+  `00000010.sav` gives "Error loading game"; it is not known yet whether it
+  loaded before the patch.
 - The base game (without Zero Hour) can also run on Wine: its `game.dat` is
   in the base Wine game folder. There is no app for it.
 
