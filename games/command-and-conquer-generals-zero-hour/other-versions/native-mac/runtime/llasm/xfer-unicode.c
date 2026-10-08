@@ -21,8 +21,11 @@
  */
 
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #include "llasm_cpu.h"
 #include "guest.h"
+#include "game-info.h"
 
 EXTERN_C uint32_t fread_c(void *ptr, uint32_t size, uint32_t n, void *f);
 EXTERN_C uint32_t fseek_c(void *f, int32_t offset, int32_t origin);
@@ -34,6 +37,44 @@ EXTERN_C uint32_t ftell_c(void *f);
 static uint32_t last_file;
 static int32_t last_position = -1;
 static int wide4;
+
+/* GENERALSZH_TRACE_XFERU=1: one line for each string on stderr (FILE,
+   position, length, new guess or kept width, the text read in each width).
+   GENERALSZH_XFERU=orig (test only): always the original read. */
+static void trace(uint32_t file, int32_t position, uint32_t length, int guessed)
+{
+    static int on = -1, orig;
+    if (on < 0)
+    {
+        const char *t = game_getenv("TRACE_XFERU"), *m = game_getenv("XFERU");
+        on = (t != NULL && *t != 0 && *t != '0');
+        orig = (m != NULL && strcmp(m, "orig") == 0);
+    }
+    if (!on) return;
+    void *f = from_guest(file);
+    unsigned char b[96] = { 0 };
+    uint32_t n = length > 24 ? 24 : length;
+    uint32_t got = fread_c(b, 1, 4 * n, f);
+    fseek_c(f, position, SEEK_SET);
+    char t2[25], t4[25];
+    for (uint32_t i = 0; i < n; i++)
+    {
+        uint32_t c2 = (2 * i + 1 < got) ? (b[2 * i] | b[2 * i + 1] << 8) : 0;
+        uint32_t c4 = (4 * i + 3 < got) ? (b[4 * i] | b[4 * i + 1] << 8 | b[4 * i + 2] << 16 | (uint32_t)b[4 * i + 3] << 24) : 0;
+        t2[i] = (c2 >= 32 && c2 < 127) ? (char)c2 : '.';
+        t4[i] = (c4 >= 32 && c4 < 127) ? (char)c4 : '.';
+    }
+    t2[n] = t4[n] = 0;
+    fprintf(stderr, "xferu file=%08x pos=%06x len=%u %s width=%d probe=%02x%02x%02x%02x 2:'%s' 4:'%s'\n",
+            file, position, length, guessed ? "guess" : "keep", orig ? 2 : (wide4 ? 4 : 2),
+            b[0], b[1], b[2], b[3], t2, t4);
+}
+
+static int original_only(void)
+{
+    const char *m = game_getenv("XFERU");
+    return m != NULL && strcmp(m, "orig") == 0;
+}
 
 /* Returns 1 when the string data is in the buffer, 0 when the caller must
    do the original read (it then fails at the end of the file and throws
@@ -47,7 +88,8 @@ EXTERNC uint32_t CCALL generals_xfer_read_unicode(uint32_t self, void *buffer, u
 
     int32_t position = (int32_t)ftell_c(f);
     if (position < 0) return 0;
-    if (file != last_file || position <= last_position)
+    int guessed = (file != last_file || position <= last_position);
+    if (guessed)
     {
         unsigned char probe[4] = { 0, 0, 0, 0 };
         uint32_t got = fread_c(probe, 1, 4, f);
@@ -56,6 +98,8 @@ EXTERNC uint32_t CCALL generals_xfer_read_unicode(uint32_t self, void *buffer, u
         last_file = file;
     }
     last_position = position;
+    trace(file, position, length, guessed);
+    if (original_only()) return 0;
 
     uint16_t *out = (uint16_t *)buffer;
     if (!wide4)
