@@ -54,18 +54,17 @@ are in [../../../../common/wine](../../../../common/wine/README.md).
   save, before offset 0x200) and keeps that width for the other texts of
   the same file. Applied to the `wine-11-athei` and `wine-8` prefixes on
   2026-10-08: the load list showed readable names, and the newest GeneralsX
-  save loaded. Known problem of that first version: the old 2024 Windows
-  save `00000010.sav` gave "Error loading game". That version guessed the
-  width again when the game read another file between two texts of a save,
-  or when the position went back. Then a short text in the middle of a
-  2-byte save can look like 4-byte text (a 1-character text followed by
-  zero bytes). The version of 2026-10-09 does not guess in the middle of a
-  save, and it keeps the width of two files at the same time;
-  `save-fix/test/test.py` shows the old and the new behavior with
-  synthetic files. Not tested yet with the real game on Wine: run the
-  script again on both `game.dat` files (it replaces the old code), then
-  load `00000010.sav`. If it still fails, load it once with
-  `game.dat.orig`: if that also fails, the save itself does not load.
+  save loaded. Then the old 2024 Windows save `00000010.sav` gave "Error
+  loading game". The real cause was not this patch: it was a GeneralsX save
+  loaded before it in the same session (GeneralsX saved ghost object
+  pictures for all players, and the retail game frees only those of the
+  local player; see `open-source-port/README.md`, check log 2026-10-09).
+  The version of 2026-10-09 of this patch also guesses the width only at
+  the description and keeps the width of two files at the same time
+  (`save-fix/test/test.py` shows the old and the new behavior with
+  synthetic files). Tested 2026-10-09 in both prefixes with the real game:
+  the converted GeneralsX save "GLA 2-2" (`00000017`) loaded, and then
+  "GLA 4-3" (`00000010`) loaded in the same session.
 - The base game (without Zero Hour) can also run on Wine: its `game.dat` is
   in the base Wine game folder. There is no app for it.
 
