@@ -34,8 +34,10 @@ later), not the MIT license of this repository.
   - `custom`: our own changes, plus a merge of each fix branch. It stays in
     the fork, and we build the app from it.
     - Cmd+Enter or Option+Enter switches between full screen and a window.
-    - The app starts in a window (in full screen the game often skips the
-      intro movie). Start it with `-fullscreen` to start in full screen.
+    - The app starts in full screen (since 2026-10-09, the user's choice).
+      From 2026-10-05 to 2026-10-09 the launcher added `-win`, because in
+      full screen the game often skips the intro movie (see "Known
+      problems"). Start it with `-win` to start in a window.
     - Cmd+Q does not quit (2026-10-09): it is next to Cmd+1 (the control
       groups) and easy to press by mistake. SagePatch takes the key off the
       Quit item of the app menu and eats the key
@@ -53,7 +55,13 @@ later), not the MIT license of this repository.
   the app, so the app itself does not need Homebrew.
 - The app that is installed now is the build of fork commit `81a31b7`
   (branch `custom`, with the Cmd+Q change), built with `make-app.sh` and
-  installed 2026-10-09. The build before it (`9555140`, fork commit
+  installed 2026-10-09. Later on 2026-10-09 its `Contents/MacOS/run.sh`
+  got the change of fork commit `5536e07` (no `-win`, so full screen) by
+  hand, in place of a rebuild, and the app was signed (`codesign -s -
+  --force`; before that it had no signature). Only `run.sh` and the new
+  `_CodeSignature` folder changed; Saves and Settings did not. The old
+  `run.sh` is in the Trash as "Command & Conquer Generals Zero Hour run.sh
+  before full screen default (2026-10-09)". The build before it (`9555140`, fork commit
   `4c5c39c` of branch `fix/retail-save-compat` merged into `custom`) went
   to the Trash on 2026-10-09 as "Command & Conquer Generals Zero Hour app
   before Cmd+Q fix (2026-10-09)". The build `4c33825` is
