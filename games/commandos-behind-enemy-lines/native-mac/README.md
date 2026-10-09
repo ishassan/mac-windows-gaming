@@ -35,9 +35,6 @@ Not tested yet: the full campaign, the tutorials, and all later missions.
 
 Known issues:
 
-- In the in-game menu (Escape), the game ignores the first mouse click. The
-  second click works. The keyboard (arrows and Return) works at once. It is
-  not known if the Windows version does the same.
 - The game uses GDI text only for the developer overlay ("FPS", screen
   mode) that `.DEVELOP 1` in `OUTPUT/Comando.cfg` turns on. The shared text
   layer draws GDI text now, but this overlay was not tested.
