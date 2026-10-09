@@ -1019,6 +1019,9 @@ static int check_controller_event(SDL_Event *event, int remove)
 
 extern "C" void DDraw_ToggleFullscreen(void);
 
+// Port change: Cmd+Q does not quit (see mac-quit-key.c).
+extern "C" void MacQuitKey_Remove(void);
+
 /* Port change: a window that a 3D API (Direct3D 8 on DXVK) draws into has
  * no SDL renderer, so SDL does not scale the mouse positions to the game's
  * screen. User32_SetClientWindow gives the window and the size of the
@@ -1039,6 +1042,7 @@ extern "C" void User32_SetClientWindow(SDL_Window *window, int width, int height
     mouse_clip_h = height;
     Game_ClientWidth = width;
     Game_ClientHeight = height;
+    MacQuitKey_Remove();
 }
 
 static void scale_client_xy(Sint32 *x, Sint32 *y)
@@ -1164,6 +1168,12 @@ static int find_event(SDL_Event *event, int remove, int wait)
             {
                 // the event is taken out of the queue once (with or without "remove")
                 if (event->type == SDL_KEYDOWN && !event->key.repeat) DDraw_ToggleFullscreen();
+                break;
+            }
+            // Port change: Cmd+Q does nothing (see mac-quit-key.c).
+            // The game does not get this key.
+            if (event->key.keysym.sym == SDLK_q && (event->key.keysym.mod & KMOD_GUI))
+            {
                 break;
             }
             // key events
@@ -1863,9 +1873,12 @@ static int find_event(SDL_Event *event, int remove, int wait)
             // window state change event
             switch (event->window.event)
             {
+            case SDL_WINDOWEVENT_FOCUS_GAINED:
+                MacQuitKey_Remove();
+                keep_event = 1;
+                break;
             case SDL_WINDOWEVENT_MINIMIZED:
             case SDL_WINDOWEVENT_RESTORED:
-            case SDL_WINDOWEVENT_FOCUS_GAINED:
             case SDL_WINDOWEVENT_FOCUS_LOST:
                 keep_event = 1;
                 break;
@@ -3494,6 +3507,7 @@ int32_t CCALL ShowCursor_c(uint32_t bShow)
  * calls this after it makes the window. */
 extern "C" void User32_ApplyCursorVisibility(void)
 {
+    MacQuitKey_Remove();
     SDL_ShowCursor((cursor_visibility >= 0) ? SDL_ENABLE : SDL_DISABLE);
 }
 

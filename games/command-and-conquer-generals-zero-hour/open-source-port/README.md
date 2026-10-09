@@ -36,6 +36,12 @@ later), not the MIT license of this repository.
     - Cmd+Enter or Option+Enter switches between full screen and a window.
     - The app starts in a window (in full screen the game often skips the
       intro movie). Start it with `-fullscreen` to start in full screen.
+    - Cmd+Q does not quit (2026-10-09): it is next to Cmd+1 (the control
+      groups) and easy to press by mistake. SagePatch takes the key off the
+      Quit item of the app menu and eats the key
+      (`Patches/SagePatch/src/macos/QuitKey_macos.cpp`). The game's Exit,
+      the Quit menu item and Quit in the Dock still quit. Not yet built or
+      tested on the Mac.
 - Build the app: `./make-app.sh` (in this folder). It builds the fork with
   the conda env of the repository (`environment.yml`) and vcpkg (in the
   ignored `build/vcpkg` of the repository root), then applies the local

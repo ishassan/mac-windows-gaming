@@ -248,6 +248,12 @@ common/wine/make-app.sh games/<game>/other-versions/wine-8/app "$HOME/Games/<Gam
 After you edit the launcher inside an app, sign the app again:
 `codesign -s - --force "<app>"`.
 
+**Cmd+Q (2026-10-09).** The Mac driver of Wine puts Cmd+Option+Q, not
+Cmd+Q, on the Quit item of its menu (`dlls/winemac.drv/cocoa_app.m`), so
+Cmd+Q goes to the game (as Ctrl+Q where `LeftCommandIsCtrl` is set) and
+does not quit. The Wine apps need no change for it. Not yet checked on the
+athei build.
+
 A new prefix links My Documents to `~/Documents`. Start the game for the
 first time with the Wine app (it sets the links first), else the game
 writes into the Mac Documents folder.

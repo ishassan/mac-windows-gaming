@@ -98,6 +98,14 @@ in the game's config file (`GAME_CONFIG_FILE` in `game.h`, a path relative
 to the game folder: `native-mac/Settings/` of the layout in the top README),
 which `runtime/Game-Config.c` reads.
 
+**Cmd+Q does not quit (2026-10-09).** Cmd+Q is next to Cmd+1 and easy to
+press by mistake, and the game then quits without a question, so the
+progress since the last save is lost. `runtime/mac-quit-key.c` takes the key
+off the Quit item of the app menu that SDL makes, and `WinApi-user32.c`
+drops the Cmd+Q key events, so the game does not get them either. To quit,
+use the game's own menu, the Quit item of the app menu, or Quit in the Dock.
+Not yet tested on the Mac.
+
 **Path redirects.** `GAME_PATH_REDIRECTS` in a game's `game.h` lists pairs
 of a path that the game opens and the real path, both relative to the game
 folder, with `/`. `CLIB_FindFile` (`CLIB.c`), which every file function

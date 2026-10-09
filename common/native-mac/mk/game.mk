@@ -51,7 +51,7 @@ SDL_CFLAGS := $(shell $(SDL_CONFIG) --cflags)
 # (the system libc++ is used). The rpath finds SDL2 in a development build;
 # common/native-mac/macos/make-bundle.sh changes it to the copy in the app bundle.
 SDL_LIBS   := $(CONDA_PREFIX)/lib/libSDL2main.a $(CONDA_PREFIX)/lib/libSDL2-2.0.0.dylib \
-              -Wl,-rpath,$(CONDA_PREFIX)/lib -Wl,-framework,Cocoa \
+              -Wl,-rpath,$(CONDA_PREFIX)/lib -Wl,-framework,Cocoa -lobjc \
               -Wl,-framework,CoreText -Wl,-framework,CoreGraphics -Wl,-framework,CoreFoundation \
               -Wl,-framework,AudioToolbox
 # FreeType (GDI text) from the conda env; make-bundle.sh copies it and its libraries.
