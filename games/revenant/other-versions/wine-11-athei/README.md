@@ -208,13 +208,30 @@ the primary is a present, so this made three presents per frame, and some
 VM screenshots were black. Now the bars are drawn for a new primary and then
 at every 64th frame.
 
-On the Mac (2026-10-09, athei, a copy of the prefix with the same Wine
-settings, the app in front): the intro filled the 4:3 area (800x600 at
-x=80 on the 960x600 display), and the log was as in the VM (960x600 OK,
-"Scaling on", "Present: primary 960x600"). Not tested on the Mac yet: the
-mouse, a save load and the CPU (the game was closed after about 15
-seconds), and a switch to another app and back during the game. The new
-`_inmm.dll` is not installed in the real prefix yet.
+On the Mac (2026-10-09): installed in the real prefixes of both Wine
+versions (the old file is kept as `_inmm.dll.bak-2026-03` next to it). The
+user started both apps and reported that the picture fills the screen
+(the logs show the 4:3 area, 800x600 at x=80 on the 960x600 display).
+Wine 8 needed one more change:
+it keeps the primary surface at the desktop size (1470x956) after the
+change to 960x600, and the Mac shows only the top-left 960x600 part of it.
+The first build centered the picture on 1470x956, so the picture was too
+big and cut at the right and the bottom. Now the fix uses the display mode
+that was set when it is smaller than the primary. The Wine 8 log:
+
+```
+CDSEW: 640x480x16
+  Failed(-2), trying 960x600x32 IN-PLACE
+  960x600 OK (in-place)
+  Scaling on: frame 640x480
+Present: primary 1470x956, display mode 960x600
+Clip 0,0-640,480 mapped to 80,0-880,600
+```
+
+Not tested on the Mac yet: the CPU, and a switch to another app and back
+during the game. The Wine 11 app was checked with the first build; the
+Wine 8 change does nothing there (primary and display mode are both
+960x600), and the VM test passed with it.
 
 What did not work (tested 2026-10-09 on the Mac, athei, a copy of the
 prefix):
@@ -251,9 +268,15 @@ port reads this value as `No` and draws the figures with Direct3D.
 ## Problems
 
 - `DDERR_GENERIC`: the display-mode fix did not load. Look at
-  `dispmode_fix.log`. `_inmm.dll` (the installed file of 2026-03: 112358
-  bytes, SHA-256 `c6f4161b...9494`) and `_inmm_real.dll` (86016 bytes,
-  SHA-256 `7ff2f56d...67aa`) must be in `C:\Revenant`.
+  `dispmode_fix.log`. `_inmm.dll` (installed 2026-10-09: 59904 bytes,
+  SHA-256 `e1c4ca3b...7a7c`; the file of 2026-03, 112358 bytes, SHA-256
+  `c6f4161b...9494`, is kept as `_inmm.dll.bak-2026-03`) and
+  `_inmm_real.dll` (86016 bytes, SHA-256 `7ff2f56d...67aa`) must be in
+  `C:\Revenant`.
+- The picture is small or cut: look for "Scaling on" and "Present:" in
+  `dispmode_fix.log`. To go back to the old result, copy
+  `_inmm.dll.bak-2026-03` to `_inmm.dll`, or set `Stretch=0` in
+  `dispmode_fix.ini`.
 - The game hangs at the start with no sound: the Miles fix is missing.
 - No window in front: use Cmd+Tab or Mission Control to find the Wine
   window.

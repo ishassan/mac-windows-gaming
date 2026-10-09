@@ -76,6 +76,7 @@ static int g_force_fallback, g_stretch = 1, g_debug;
 static DWORD g_frame_caps = DDSCAPS_SYSTEMMEMORY;   /* FrameMemory= system (default), video, any */
 static DWORD g_fb_w = 960, g_fb_h = 600;
 static int g_scaled;                  /* 1 after a fallback: the frame is smaller than the screen */
+static LONG g_mode_w, g_mode_h;       /* the last display mode that was set */
 static LONG g_frame_w = 640, g_frame_h = 480;
 
 static void read_settings(void) {
@@ -120,7 +121,7 @@ static LONG WINAPI Hooked_CDSEW(LPCWSTR dev, DEVMODEW *dm, HWND hwnd, DWORD flag
     } else {
         result = ((PFN_CDSEW)g_cdsew.target)(dev, dm, hwnd, flags, lp);
     }
-    if (result == DISP_CHANGE_SUCCESSFUL) { hook_log("  OK"); goto rehook; }
+    if (result == DISP_CHANGE_SUCCESSFUL) { hook_log("  OK"); g_mode_w = dm->dmPelsWidth; g_mode_h = dm->dmPelsHeight; goto rehook; }
 
     hook_log("  Failed(%ld), trying %lux%lux32 IN-PLACE", result, (unsigned long)g_fb_w, (unsigned long)g_fb_h);
     result = try_mode(dev, dm, hwnd, flags, lp, g_fb_w, g_fb_h);
@@ -136,6 +137,7 @@ static LONG WINAPI Hooked_CDSEW(LPCWSTR dev, DEVMODEW *dm, HWND hwnd, DWORD flag
         if (result == DISP_CHANGE_SUCCESSFUL) hook_log("  current mode OK (in-place)");
         else { hook_log("  Faking success"); result = DISP_CHANGE_SUCCESSFUL; }
     }
+    if (result == DISP_CHANGE_SUCCESSFUL) { g_mode_w = dm->dmPelsWidth; g_mode_h = dm->dmPelsHeight; }
     if (req_w < dm->dmPelsWidth || req_h < dm->dmPelsHeight) {
         if (!g_scaled) hook_log("  Scaling on: frame %lux%lu", (unsigned long)req_w, (unsigned long)req_h);
         g_scaled = 1; g_frame_w = req_w; g_frame_h = req_h;
@@ -260,6 +262,16 @@ static void restore_frame(void) {
 
 static void scaling_started(void);
 
+/* The part of the primary that is on the screen. Wine 8 keeps the primary
+ * at the desktop size (1470x956) after the change to 960x600, and the Mac
+ * shows only its top-left 960x600 part. So use the display mode when it is
+ * smaller than the primary. */
+static void screen_size(LONG *W, LONG *H) {
+    *W = g_prim_w; *H = g_prim_h;
+    if (g_mode_w > 0 && g_mode_w < *W) *W = g_mode_w;
+    if (g_mode_h > 0 && g_mode_h < *H) *H = g_mode_h;
+}
+
 /* Debug=1: log the number of frames per second (writes to the primary) */
 static void debug_frame(void) {
     static DWORD t0, frames;
@@ -278,7 +290,7 @@ static void present(int v, void *prim) {
     RECT src = { 0, 0, g_frame_w, g_frame_h }, dst, bar[2];
     DDBLTFX fx;
     HRESULT hr;
-    LONG w, h, x, y;
+    LONG w, h, x, y, W, H;
     int i, new_bars = prim != g_bars_for || (++g_bars_count & 63) == 0;
     if (new_bars) g_prim_size_for = NULL;   /* read the size again with the bars */
     if (prim != g_prim_size_for) {
@@ -288,18 +300,19 @@ static void present(int v, void *prim) {
         if (((GetDesc_t)VT(prim, I_GETSURFACEDESC))(prim, &d) != DD_OK) return;
         if (d.dwWidth != (DWORD)g_prim_w || d.dwHeight != (DWORD)g_prim_h) {
             g_prim_w = d.dwWidth; g_prim_h = d.dwHeight;
-            hook_log("Present: primary %ldx%ld", g_prim_w, g_prim_h);
+            hook_log("Present: primary %ldx%ld, display mode %ldx%ld", g_prim_w, g_prim_h, g_mode_w, g_mode_h);
             g_prim_size_for = prim;
             scaling_started();
         }
         g_prim_size_for = prim;
     }
-    if (g_prim_w * g_frame_h >= g_prim_h * g_frame_w) { h = g_prim_h; w = h * g_frame_w / g_frame_h; }
-    else { w = g_prim_w; h = w * g_frame_h / g_frame_w; }
-    x = (g_prim_w - w) / 2; y = (g_prim_h - h) / 2;
+    screen_size(&W, &H);
+    if (W * g_frame_h >= H * g_frame_w) { h = H; w = h * g_frame_w / g_frame_h; }
+    else { w = W; h = w * g_frame_h / g_frame_w; }
+    x = (W - w) / 2; y = (H - h) / 2;
     SetRect(&dst, x, y, x + w, y + h);
-    if (x > 0) { SetRect(&bar[0], 0, 0, x, g_prim_h); SetRect(&bar[1], x + w, 0, g_prim_w, g_prim_h); }
-    else { SetRect(&bar[0], 0, 0, g_prim_w, y); SetRect(&bar[1], 0, y + h, g_prim_w, g_prim_h); }
+    if (x > 0) { SetRect(&bar[0], 0, 0, x, H); SetRect(&bar[1], x + w, 0, W, H); }
+    else { SetRect(&bar[0], 0, 0, W, y); SetRect(&bar[1], 0, y + h, W, H); }
     /* In Wine each write to the primary is a present, so the bars are
      * drawn only for a new primary and then at every 64th frame. */
     if (new_bars) {
@@ -485,9 +498,11 @@ static BOOL (WINAPI *real_ClipCursor)(const RECT *);
 /* The scaled area on the screen; 0 when there is no scaling yet */
 static int area(LONG *x, LONG *y, LONG *w, LONG *h) {
     if (!active() || !g_prim_size_for) return 0;
-    if (g_prim_w * g_frame_h >= g_prim_h * g_frame_w) { *h = g_prim_h; *w = *h * g_frame_w / g_frame_h; }
-    else { *w = g_prim_w; *h = *w * g_frame_h / g_frame_w; }
-    *x = (g_prim_w - *w) / 2; *y = (g_prim_h - *h) / 2;
+    LONG W, H;
+    screen_size(&W, &H);
+    if (W * g_frame_h >= H * g_frame_w) { *h = H; *w = *h * g_frame_w / g_frame_h; }
+    else { *w = W; *h = *w * g_frame_h / g_frame_w; }
+    *x = (W - *w) / 2; *y = (H - *h) / 2;
     return 1;
 }
 
