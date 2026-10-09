@@ -101,6 +101,22 @@ make                             # recompile the exe and build build/<Game>
 The game folder's README has the data folder, the status and the debug
 options of that game.
 
+## Test
+
+The games normally take the screen. To test while you use the Mac:
+
+- Native ports: `<P>BACKGROUND=1` draws into memory, with no window and no
+  sound (Generals native: `GENERALSZH_BACKGROUND=offscreen`). See
+  [common/native-mac/README.md](common/native-mac/README.md).
+- Wine, start test: the null display driver in a copy of the prefix. It
+  shows that a program starts and finds its files and DLLs, but not the
+  picture. See [common/wine/README.md](common/wine/README.md).
+- Wine with a picture: [linux-test-vm/](linux-test-vm/README.md).
+- Speed: [benchmark/](benchmark/README.md).
+
+All versions of a game share the saves. Back them up (or record their
+checksums) before a test.
+
 ## Add a game
 
 1. Make a folder `games/<game>/native-mac/` with `game.conf`, `runtime/game.h`,

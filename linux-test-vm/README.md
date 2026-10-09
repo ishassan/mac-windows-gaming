@@ -7,6 +7,53 @@ the Mac. It shows Linux Wine 11 (Hangover), not the Mac Wine 8 of the Wine
 apps. On the Mac itself, a Wine test that must show a picture opens a
 window.
 
+## Why a Linux VM (2026-10-05)
+
+The Wine versions could not show a picture without a window on the Mac.
+These were the options. The chosen way: this VM for Wine pictures, and a
+Wine test on the Mac that must show a picture waits until the user is away
+or says yes. The disk sizes of options 1, 3 and 5 are estimates, not
+measured.
+
+| # | Option | Disk on the Mac | Same Wine as the Wine apps | 3D (Generals) |
+|---|---|---|---|---|
+| 1 | EC2: Linux Wine under Xvfb | none (game files copied to EC2) | no (Linux Wine) | yes (software OpenGL) |
+| 2 | **Chosen:** Linux VM (Lima) with Hangover Wine and FEX, on an in-memory X screen | about 9 GB VM disk (measured) | no (Linux Wine 11) | yes (software OpenGL) |
+| 3 | Our own Mac Wine build with the X11 driver, under the Mac's Xvfb | about 1 to 2 GB of build files | yes | no |
+| 4 | **Chosen (with 2):** no new setup on the Mac | none | n/a | n/a |
+| 5 | Virtual Mac (`tart`, Apple Virtualization framework) | about 25 to 60 GB | yes | yes (Apple virtual graphics) |
+
+- 1, EC2: Linux Wine draws on Xvfb (a screen in memory) with software
+  OpenGL (Mesa `llvmpipe`). It shows Linux Wine, not the Mac Wine.
+- 3, Mac Wine with X11: `wine-crossover` and the WineHQ Mac builds (Gcenx)
+  are built `--without-x`, so a new build of the CrossOver source with
+  `--with-x` is necessary. The Mac's Xvfb (XQuartz 2.8.1) has no OpenGL:
+  `glxinfo` gave "couldn't find RGB GLX visual or fbconfig" (tested
+  2026-10-05). So only 2D drawing works (Wine Direct3D `renderer=gdi`, the
+  GDI renderer of cnc-ddraw). Start Xvfb with `-listen tcp -nolisten unix
+  -nolisten local` and `DISPLAY=127.0.0.1:<n>` (`/tmp/.X11-unix` does not
+  exist on the Mac).
+- 5, Virtual Mac: a second macOS, run with `tart run --no-graphics` and
+  controlled over `ssh`. It can use the same Mac Wine, so the pictures are
+  the same as in the Wine apps, 3D too. Tried on 2026-10-05, then removed.
+  Notes for a next try: `brew install cirruslabs/cli/tart` failed (the
+  formula uses `depends_on macos:` outside `on_macos`), so use
+  `gh release download -R cirruslabs/tart`. The image
+  `ghcr.io/cirruslabs/macos-tahoe-base:latest` is a 27 GB download
+  (`tahoe-vanilla`: 24 GB, but no Homebrew and no guest agent for
+  `tart exec`). With `tart run --no-graphics --vnc-experimental`, tart has
+  no Dock icon, does not become the active app, and prints the VNC
+  address; take pictures with `vncdotool`. The Wine game folders use
+  absolute links to `/Users/<user>/Games/...`, so the guest needs that path
+  to point to the shared copy of the games. Not checked: Rosetta and Wine
+  in the guest, 3D speed.
+
+Ways that do not work: a virtual monitor (`CGVirtualDisplay`, as in DeskPad
+or BetterDisplay) draws the picture, but the game still becomes the active
+app and takes the keyboard. Starting a game behind other windows: these
+games make themselves the active window, and full screen moves to a new
+desktop. A minimized window is not drawn.
+
 ## What it is
 
 - A [Lima](https://lima-vm.io) VM named `games`: Ubuntu 26.04 arm64, Apple
