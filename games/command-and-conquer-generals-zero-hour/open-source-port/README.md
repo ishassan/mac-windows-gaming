@@ -45,10 +45,12 @@ later), not the MIT license of this repository.
 - The build uses the Homebrew `ffmpeg` and `libpng` of this Mac if they are
   installed, as the official release does. The bundle step copies them into
   the app, so the app itself does not need Homebrew.
-- The app that is installed now is the build of branch `custom`, fork commit
-  `4c33825` (the save fix, now also for writing), built with `make-app.sh`
-  and installed 2026-10-08. The build before it (`a692659`) is in
-  `~/Library/Caches/games-reorg-backup-2026-10-08`. The build `5f02335`
+- The app that is installed now is the build of fork branch
+  `fix/retail-save-compat` (commit `4c5c39c`, on `custom` `4c33825`),
+  built with `make-app.sh` and installed 2026-10-09. The build before it
+  (`4c33825`) is `generals-open-source-port-app-before-ghost-fix.app`, and
+  the build `a692659` is `generals-open-source-port-app-before-save-fix`,
+  both in `~/Library/Caches/games-reorg-backup-2026-10-08`. The build `5f02335`
   went to the Trash on 2026-10-08, and the downloaded 1.0.2 app on
   2026-10-06.
 - The build step also makes the app self-contained: it points MoltenVK at the
@@ -201,6 +203,28 @@ them again, in this order.
 
 ## Check log
 
+- 2026-10-09: build of branch `fix/retail-save-compat` (two save fixes for
+  the retail game). (1) With the player observer option (on by default),
+  GeneralsX keeps ghost object pictures (buildings under the fog) for all
+  players and saved all of them. The retail game loads them, but frees only
+  those of the local player, so every next load in the same session failed
+  with "Error loading game" (`ERROR_BAD_INI`). Seen in Wine and in our
+  native port; it also fails with the unpatched `game.dat`. A copy of save
+  `00000017` that keeps only the local player's pictures did not cause the
+  failure.
+  The fix saves the pictures of the local player only. (2) The save header
+  stored the full Mac path of the map as its label; it now stores the file
+  name only (`getMapLeafName`). Tested with a test home folder: GeneralsX
+  loaded `00000017` and saved it again; the new save has pictures for the
+  local player only and the label `md_gla02.map`. Our native port
+  (offscreen, scripted input) loaded the new save, and then the Windows
+  save `00000010` in the same session. Installed. Then the older GeneralsX
+  saves `00000014` to `00000018` in `Saves/Zero Hour` were converted the
+  same way (only the local player's pictures, the map file name as label),
+  with the originals backed up in
+  `~/Library/Caches/games-reorg-backup-2026-10-08/saves-before-convert-2026-10-09`.
+  The converted `00000015` loaded in our native port, and then `00000010`
+  in the same session.
 - 2026-10-08: build of fork commit `4c33825` (writes 2-byte text) tested
   with a test copy of the settings and saves (`HOME=/tmp/gxhome`): the
   Windows save "GLA 1" loaded, a new save had 2-byte text, and our native
