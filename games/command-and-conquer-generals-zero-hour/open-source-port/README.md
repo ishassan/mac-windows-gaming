@@ -40,8 +40,8 @@ later), not the MIT license of this repository.
       groups) and easy to press by mistake. SagePatch takes the key off the
       Quit item of the app menu and eats the key
       (`Patches/SagePatch/src/macos/QuitKey_macos.cpp`). The game's Exit,
-      the Quit menu item and Quit in the Dock still quit. Not yet built or
-      tested on the Mac.
+      the Quit menu item and Quit in the Dock still quit. Tested on the Mac
+      2026-10-09: Cmd+Q did nothing, and the Quit menu item quit the game.
 - Build the app: `./make-app.sh` (in this folder). It builds the fork with
   the conda env of the repository (`environment.yml`) and vcpkg (in the
   ignored `build/vcpkg` of the repository root), then applies the local
@@ -51,11 +51,13 @@ later), not the MIT license of this repository.
 - The build uses the Homebrew `ffmpeg` and `libpng` of this Mac if they are
   installed, as the official release does. The bundle step copies them into
   the app, so the app itself does not need Homebrew.
-- The app that is installed now is the build of fork commit `4c5c39c`
-  (branch `fix/retail-save-compat`, merged into `custom` as `9555140`),
-  built with `make-app.sh` and installed 2026-10-09. The build before it
-  (`4c33825`) is `generals-open-source-port-app-before-ghost-fix.app`, and
-  the build `a692659` is `generals-open-source-port-app-before-save-fix`,
+- The app that is installed now is the build of fork commit `81a31b7`
+  (branch `custom`, with the Cmd+Q change), built with `make-app.sh` and
+  installed 2026-10-09. The build before it (`9555140`, fork commit
+  `4c5c39c` of branch `fix/retail-save-compat` merged into `custom`) went
+  to the Trash on 2026-10-09 as "Command & Conquer Generals Zero Hour app
+  before Cmd+Q fix (2026-10-09)". The build `4c33825` is
+  `generals-open-source-port-app-before-ghost-fix.app`, and the build `a692659` is `generals-open-source-port-app-before-save-fix`,
   both in `~/Library/Caches/games-reorg-backup-2026-10-08`. The build `5f02335`
   went to the Trash on 2026-10-08, and the downloaded 1.0.2 app on
   2026-10-06.

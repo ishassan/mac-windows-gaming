@@ -104,7 +104,10 @@ progress since the last save is lost. `runtime/mac-quit-key.c` takes the key
 off the Quit item of the app menu that SDL makes, and `WinApi-user32.c`
 drops the Cmd+Q key events, so the game does not get them either. To quit,
 use the game's own menu, the Quit item of the app menu, or Quit in the Dock.
-Not yet tested on the Mac.
+Tested on the Mac 2026-10-09 (Commandos): Cmd+Q did nothing, and the Quit
+menu item quit the game. The Commandos and Revenant native apps with this
+change (commit `9be69a9`) were installed 2026-10-09. The apps before them
+went to the Trash as "<app name> app before Cmd+Q fix (2026-10-09)".
 
 **Path redirects.** `GAME_PATH_REDIRECTS` in a game's `game.h` lists pairs
 of a path that the game opens and the real path, both relative to the game
