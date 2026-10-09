@@ -45,8 +45,8 @@ later), not the MIT license of this repository.
 - The build uses the Homebrew `ffmpeg` and `libpng` of this Mac if they are
   installed, as the official release does. The bundle step copies them into
   the app, so the app itself does not need Homebrew.
-- The app that is installed now is the build of fork branch
-  `fix/retail-save-compat` (commit `4c5c39c`, on `custom` `4c33825`),
+- The app that is installed now is the build of fork commit `4c5c39c`
+  (branch `fix/retail-save-compat`, merged into `custom` as `9555140`),
   built with `make-app.sh` and installed 2026-10-09. The build before it
   (`4c33825`) is `generals-open-source-port-app-before-ghost-fix.app`, and
   the build `a692659` is `generals-open-source-port-app-before-save-fix`,
