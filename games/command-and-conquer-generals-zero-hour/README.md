@@ -14,6 +14,8 @@ Other versions, kept to test and to compare when there is a problem:
 | [other-versions/wine-8](other-versions/wine-8/README.md) | The Windows version on Wine 8, kept to compare. |
 
 All 4 versions read the same saves (`~/Games/Command and Conquer Generals Zero
-Hour/Saves/Zero Hour`). Known problem: in the Wine versions, one old save
-from 2024 did not load with the first save fix; the fix of 2026-10-09 is not
-tested yet on Wine (see [other-versions/wine-11-athei](other-versions/wine-11-athei/README.md)).
+Hour/Saves/Zero Hour`). The old 2024 Windows save that gave "Error loading
+game" in the Wine versions loads since 2026-10-09, in both Wine versions. The
+cause was a GeneralsX save loaded before it in the same session, not the Wine
+save fix (see [other-versions/wine-11-athei](other-versions/wine-11-athei/README.md)
+and the check log of [open-source-port](open-source-port/README.md)).
