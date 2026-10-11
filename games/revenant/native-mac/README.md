@@ -26,7 +26,7 @@ own frames:
 | 3D figure on the inventory screen | Clean when it moves. (Before 2026-10-05 it left old poses on the screen: the game repaints the screen area that Direct3D reports in `GetClipStatus`, and the port reported no area.) |
 | Mouse cursor | Only the game cursor shows (the Mac cursor is hidden). |
 | Load game | Works (a GOG save in Misthaven loads). |
-| Save game into a new slot | Works (typed name, `Save/Single/<name>` is written). |
+| Save game into a new slot | Works (typed name, `Save/Single/<name>` is written). Since 2026-10-11 the save also gets its picture (`ss.bmp`), and the Load Game menu shows it (tested 2026-10-11). Saves made with the port before 2026-10-11 have no picture: when one is selected, the menu keeps the picture of the save selected before it. |
 | Music (the GOG `Music/TrackNN.ogg` files as CD tracks) | Starts with the game. Not checked by ear. |
 | Frame rate | About 25 frames per second in the Keep, at about 20% of one CPU core. |
 | Process | arm64 only (no Rosetta). |
@@ -139,6 +139,18 @@ stops for another version). They are in `srw/`:
   and the game uses the handle again. The app with this fix was installed
   2026-10-11; the app before it is in the Trash as "Revenant (Native) app
   before voice fix (2026-10-11)".
+- The save picture: the game writes `ss.bmp` into its folder (the port
+  sends it to `native-mac/Settings`), then checks
+  `FindFirstFileA(".\ss.bmp")` and copies the file with the name from
+  the search result into the save folder. Until 2026-10-11 two things
+  broke this: the redirect did not match `./ss.bmp` (the check failed and
+  the game did not copy the picture), and a search with no wildcard gave
+  the whole found path (`../native-mac/Settings/ss.bmp`), not only the
+  file name as Windows does (the copy then failed, and the game tried
+  again without end). Since 2026-10-11 `CLIB_FindFile` removes `./` parts
+  before the redirect, and `FindFirstFileA` gives only the file name. The
+  app with this fix was installed 2026-10-11; the app before it is in the
+  Trash as "Revenant (Native) app before save picture fix (2026-10-11)".
 - The game reads `GetDeviceIdentifier` into a 1064-byte DirectX 6 structure
   on its stack (a larger write breaks its return address).
 - The game draws its interface text with GDI on surfaces with

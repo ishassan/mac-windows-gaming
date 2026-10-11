@@ -423,6 +423,14 @@ int CLIB_FindFile(const char *src, char *dst)
         *d = (*src == '\\') ? '/' : *src;
     }
     *d = 0;
+    /* "./" parts name the same folder: remove them, so that ".\ss.bmp"
+     * (Revenant, before it copies the save picture) is "ss.bmp" and gets
+     * its redirect */
+    for (d = dst; (d = strstr(d, "./")) != NULL; )
+    {
+        if ((d == dst || d[-1] == '/') && d[2] != 0) memmove(d, d + 2, strlen(d + 2) + 1);
+        else d += 2;
+    }
 #ifdef GAME_PATH_REDIRECTS
     redirect_path(dst);
 #endif

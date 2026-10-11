@@ -1291,7 +1291,10 @@ static void * FindFirstFileA_impl(const char *lpFileName, void *lpFindFileData)
     }
 
     // fill find structure
-    Conv_find((win32_find_data *)lpFindFileData, &filestat, (direntry != NULL)?direntry->d_name:buf);
+    // Port change: a search without wildcards gives only the name of the
+    // file, as in Windows, not the folders (nor the redirected path of
+    // GAME_PATH_REDIRECTS: Revenant copies the file of this name into a save)
+    Conv_find((win32_find_data *)lpFindFileData, &filestat, (direntry != NULL)?direntry->d_name:(strrchr(buf, '/') ? strrchr(buf, '/') + 1 : buf));
 
 #ifdef DEBUG_KERNEL32
     eprintf("found file: %s\n", (direntry != NULL)?direntry->d_name:buf);
