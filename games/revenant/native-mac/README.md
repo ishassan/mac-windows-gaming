@@ -22,6 +22,7 @@ own frames:
 | Speech (MP3 samples in `resources.rvr`) | Plays (decoded with macOS AudioToolbox). Not checked by ear. |
 | 3D characters (Direct3D 6 on the software rasterizer) | Drawn with smooth light, as with a 3D card (see "3D renderer" below). The light and shade on the figures match Wine in Direct3D mode (`Software3D=No`). (Before 2026-10-05 the point lights, for example the inventory light and the torches, were almost zero: the figures were flat, and the inventory figure looked stocky.) |
 | Text (GDI fonts on surfaces: dialogs, messages, stats) | Drawn with the macOS fonts of the same name (Times New Roman, Arial) and their hints. Smooth edges at the sizes where the font asks for them (its "gasp" table), as Wine and GDI with font smoothing do: the dialog text has smooth edges. |
+| Message log and dialog text | Clean (tested 2026-10-11: each line of the message log matches the game's text surface pixel for pixel, and the exit dialog reads "and return to Windows?"). The game copies its GDI text into textures and draws them as Direct3D quads. Before 2026-10-11 some rows and columns of these textures were doubled and others were missing ("Locke entered" read "Luuku ulurud"), see "Port notes". |
 | 3D figure on the inventory screen | Clean when it moves. (Before 2026-10-05 it left old poses on the screen: the game repaints the screen area that Direct3D reports in `GetClipStatus`, and the port reported no area.) |
 | Mouse cursor | Only the game cursor shows (the Mac cursor is hidden). |
 | Load game | Works (a GOG save in Misthaven loads). |
@@ -129,6 +130,18 @@ stops for another version). They are in `srw/`:
   on its stack (a larger write breaks its return address).
 - The game draws its interface text with GDI on surfaces with
   `DDSCAPS_OWNDC`, and sizes those surfaces from `GetTextMetrics`.
+- The message log and the dialogs are textured quads: the game draws a
+  line with GDI on a 640x12 surface, copies it into 144x144 textures (12
+  rows for each line), and draws them with `DrawPrimitive` (pre-transformed
+  vertices at whole pixel positions, texture coordinates plus half a texel,
+  for example v = 108.5 / 144 at y = 444). Direct3D 6 puts the pixel
+  centers at whole coordinates, so each pixel samples a texel center. The
+  port's rasterizer used centers at x + 0.5 and y + 0.5 until 2026-10-11,
+  which sampled exactly on the edges between texels: rounding then doubled
+  some rows and columns and dropped others. Since 2026-10-11 it uses the
+  Direct3D rule (`raster_triangle` in `WinApi-d3d.c`). The app with this fix was
+  installed 2026-10-11; the app before it is in the Trash as "Revenant
+  (Native) app before text fix (2026-10-11)".
 
 ## License and credits
 
