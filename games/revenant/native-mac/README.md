@@ -19,7 +19,7 @@ own frames:
 | Intro videos (Smacker, 640x240 interlaced, 44.1 kHz stereo sound) | Play. Escape skips them. |
 | Main menu, mouse, keyboard | Work. |
 | New game: the Keep, walking, talking (dialog choices) | Work. |
-| Speech (MP3 samples in `resources.rvr`) | Plays (decoded with macOS AudioToolbox). Not checked by ear. |
+| Speech and sound effects (MP3 speech in `resources.rvr`, WAV effects) | Play (MP3 decoded with macOS AudioToolbox). Tested 2026-10-11 with traces: in a conversation that starts 150 s after a save loads, each speech line starts, is decoded (for example 723456 bytes) and plays to its end. Before 2026-10-11 all sound stopped after about one minute of play, so the conversations had text and no speech (see "Port notes"). Not checked by ear. |
 | 3D characters (Direct3D 6 on the software rasterizer) | Drawn with smooth light, as with a 3D card (see "3D renderer" below). The light and shade on the figures match Wine in Direct3D mode (`Software3D=No`). (Before 2026-10-05 the point lights, for example the inventory light and the torches, were almost zero: the figures were flat, and the inventory figure looked stocky.) |
 | Text (GDI fonts on surfaces: dialogs, messages, stats) | Drawn with the macOS fonts of the same name (Times New Roman, Arial) and their hints. Smooth edges at the sizes where the font asks for them (its "gasp" table), as Wine and GDI with font smoothing do: the dialog text has smooth edges. |
 | Message log and dialog text | Clean (tested 2026-10-11: each line of the message log matches the game's text surface pixel for pixel, and the exit dialog reads "and return to Windows?"). The game copies its GDI text into textures and draws them as Direct3D quads. Before 2026-10-11 some rows and columns of these textures were doubled and others were missing ("Locke entered" read "Luuku ulurud"), see "Port notes". |
@@ -126,6 +126,19 @@ stops for another version). They are in `srw/`:
 - The speech is MP3 data in `resources.rvr`. The game plays it through
   `AIL_set_named_sample_file` with the suffix `.mp3` (Miles decodes it with
   `mp3dec.asi`).
+- The game plays some empty WAV files (196 bytes, a `data` chunk of 0
+  bytes, made with "WaveConvertPro"), about once every few seconds while
+  Locke is in a room. It has 15 sample handles and uses only a handle
+  whose status is "done". Until 2026-10-11 the mixer marked an empty sound
+  as playing and never ended it (it skips a channel with no frames), so
+  each empty WAV blocked one handle for ever. A trace on 2026-10-11 showed
+  all 15 handles blocked 85 s after the "talk" save loaded; after that the
+  game started no sound at all, and a conversation showed its text with no
+  speech. Since 2026-10-11 a sound with no frames ends at once
+  (`Mixer_Start` in `audio-mixer.c`), the end-of-sample callback comes,
+  and the game uses the handle again. The app with this fix was installed
+  2026-10-11; the app before it is in the Trash as "Revenant (Native) app
+  before voice fix (2026-10-11)".
 - The game reads `GetDeviceIdentifier` into a 1064-byte DirectX 6 structure
   on its stack (a larger write breaks its return address).
 - The game draws its interface text with GDI on surfaces with

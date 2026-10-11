@@ -72,7 +72,7 @@ becomes a trap, listed in `build/srw/srw-traps.txt`), and stages the output.
 | `WinApi-d3d.c` | Direct3D 6 (IDirect3D3, IDirect3DDevice3) with a software rasterizer: transforms, lighting, textures, z-buffer, blending. The depth range is 0..1, and point lights use the Direct3D 6 attenuation rule, as in Wine. |
 | `WinApi-dinput.c` | DirectInput 5: system keyboard and mouse (no joysticks). |
 | `WinApi-dplay.c` | DirectPlay 4 objects without network (for games that make them at start-up). |
-| `WinApi-mss32.c`, `WinApi-mss32-redbook.c`, `audio-mixer.c`, `audio-decode.c` | Miles Sound System on a native mixer; MP3 samples in memory and CD audio from audio files (macOS AudioToolbox). End-of-sample callbacks come from a service thread, or on the main thread (from `Sleep` and `PeekMessageA`) for a game with `GAME_MSS_EOS_MAIN_THREAD` in `game.h`. |
+| `WinApi-mss32.c`, `WinApi-mss32-redbook.c`, `audio-mixer.c`, `audio-decode.c` | Miles Sound System on a native mixer; MP3 samples in memory and CD audio from audio files (macOS AudioToolbox). End-of-sample callbacks come from a service thread, or on the main thread (from `Sleep` and `PeekMessageA`) for a game with `GAME_MSS_EOS_MAIN_THREAD` in `game.h`. A sample with no sound data (an empty WAV file) ends at once, with its end-of-sample callback, as in Miles (since 2026-10-11). |
 | `WinApi-smackw32.c` | Smacker video decoder and player. |
 | `WinApi-amstream.c`, `video-avi.c` | DirectShow multimedia stream: AVI with Cinepak and MS ADPCM. |
 | `WinApi-winmm.c`, `WinApi-misc.c` | winmm timers, COM, shell functions, and the network stubs (sockets fail). |

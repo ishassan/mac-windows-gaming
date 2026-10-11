@@ -203,7 +203,10 @@ void Mixer_Start(int id)
     if (!valid(id)) return;
     SDL_LockAudioDevice(device);
     channels[id - 1].pos = 0;
-    channels[id - 1].playing = 1;
+    /* A sound with no frames (Revenant has empty WAV files) ends at once.
+     * Else the mixer skips it, it stays "playing" for ever, and the game
+     * never gets its sample handle back. */
+    channels[id - 1].playing = (channels[id - 1].frames > 0);
     channels[id - 1].paused = 0;
     SDL_UnlockAudioDevice(device);
 }
