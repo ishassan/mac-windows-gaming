@@ -1049,6 +1049,14 @@ static void set_attr(span_attr *a, const vtx *v)
 
 #define ATTR_N 11
 
+/* Direct3D 6 (as all versions up to 9) puts the center of a pixel at whole
+ * screen coordinates: pixel (x, y) is drawn when the point (x, y) is in the
+ * triangle, and its attributes are taken at that point. Games add half a
+ * texel to the texture coordinates for this: Revenant gives a 2D quad at
+ * y = 444 the coordinate v = 108.5 / 144, so that the pixel samples the
+ * center of texel row 108. A center at y + 0.5 samples exactly on the edge
+ * between two texel rows, and rounding then picks rows and columns at
+ * random (doubled and missing rows in the message log text). */
 static void raster_triangle(const vtx *v0, const vtx *v1, const vtx *v2, const raster_ctx *rc)
 {
     const vtx *v[3] = { v0, v1, v2 };
@@ -1073,14 +1081,14 @@ static void raster_triangle(const vtx *v0, const vtx *v1, const vtx *v2, const r
         pdx[k] = (d1 * (v[2]->sy - v[0]->sy) - d2 * (v[1]->sy - v[0]->sy)) / area;
     }
 
-    int ystart = (int)ceilf(v[0]->sy - 0.5f), yend = (int)ceilf(v[2]->sy - 0.5f);
+    int ystart = (int)ceilf(v[0]->sy), yend = (int)ceilf(v[2]->sy);
     if (ystart < rc->vy0) ystart = rc->vy0;
     if (yend > rc->vy1) yend = rc->vy1;
     triangles_drawn++;
 
     for (int y = ystart; y < yend; y++)
     {
-        float py = y + 0.5f;
+        float py = (float)y;
         /* long edge 0-2, short edge 0-1 or 1-2 */
         float t02 = (py - v[0]->sy) / (v[2]->sy - v[0]->sy);
         float xl = v[0]->sx + (v[2]->sx - v[0]->sx) * t02;
@@ -1100,11 +1108,11 @@ static void raster_triangle(const vtx *v0, const vtx *v1, const vtx *v2, const r
         float *pat = (float *)&at;
         for (int k = 0; k < ATTR_N; k++) pat[k] = a0[k] + (a2[k] - a0[k]) * t02;
         float x0f = xl < xr ? xl : xr, x1f = xl < xr ? xr : xl;
-        int x0 = (int)ceilf(x0f - 0.5f), x1 = (int)ceilf(x1f - 0.5f);
+        int x0 = (int)ceilf(x0f), x1 = (int)ceilf(x1f);
         if (x0 < rc->vx0) x0 = rc->vx0;
         if (x1 > rc->vx1) x1 = rc->vx1;
         if (x0 >= x1) continue;
-        float step = (x0 + 0.5f) - xl;
+        float step = x0 - xl;
         for (int k = 0; k < ATTR_N; k++) pat[k] += pdx[k] * step;
         draw_span(y, x0, x1, &at, &dx);
     }

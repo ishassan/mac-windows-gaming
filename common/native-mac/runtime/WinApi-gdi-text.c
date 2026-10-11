@@ -868,9 +868,11 @@ static void text_out_g(gdi_dc *d, int x, int y, const glyph_list &gl, const char
     if ((d->align & TA_BASELINE) == TA_BASELINE) y -= f->ascent;
     else if (d->align & TA_BOTTOM) y -= f->height;
     if (d->align & TA_UPDATECP) d->cur_x += w;
-    if (trace()) fprintf(stderr, "GDI: text at %d,%d \"%.*s\" color 0x%06x%s%s\n", x, y, n, s ? s : "", d->text_color,
-                         (d->bk_mode == OPAQUE) ? " opaque" : "", (d->surface || d->dib) ? "" : " (window DC, not drawn)");
-    if (!open_target(d, &t)) return;
+    int drawn = open_target(d, &t);
+    if (trace()) fprintf(stderr, "GDI: text at %d,%d \"%.*s\" color 0x%06x%s on %dx%d%s\n", x, y, n, s ? s : "", d->text_color,
+                         (d->bk_mode == OPAQUE) ? " opaque" : "", drawn ? t.width : 0, drawn ? t.height : 0,
+                         drawn ? "" : " (window DC, not drawn)");
+    if (!drawn) return;
     if (clip)
     {
         if (clip[0] + d->org_x > t.clip_x0) t.clip_x0 = clip[0] + d->org_x;
