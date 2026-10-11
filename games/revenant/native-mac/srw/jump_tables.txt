@@ -3,7 +3,8 @@
 # CRT memcpy (0x58b780): TrailUpVec, used with index 0..3 and -4..-1
 58b8d8  0  4
 58b8e8 -4  4
-# UnwindDownVec, used with index -7..0
+# UnwindDownVec, used with index -7..0. SRW puts the entries -7..-1 2 bytes
+# too low; instruction_replacements.sci jumps without the table (2026-10-12).
 58ba20 -7  8
 # TrailDownVec, index 0..3
 58ba70  0  4

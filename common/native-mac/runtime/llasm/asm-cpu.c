@@ -211,13 +211,19 @@ EXTERNC void x86_print_stack_trace(unsigned int words)
     fprintf(stderr, "\n");
 }
 
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/ucontext.h>
+#include <time.h>
 #include <unistd.h>
 
 /* Port change: on a crash, print the guest registers and a rough guest
- * call trace (see tools/trace.py), then stop. */
-static void crash_handler(int sig, siginfo_t *info, void *context)
+ * call trace (see tools/trace.py), then stop. The report goes to stderr
+ * and is added to the crash log file (an app opened from the Finder has no
+ * stderr that the user can read). */
+static char crash_log_path[4096];
+
+static void crash_report(int sig, siginfo_t *info, void *context)
 {
     _cpu *cpu = thread_cpu;
     fprintf(stderr, "crash: signal %d, address %p\n", sig, info->si_addr);
@@ -246,15 +252,35 @@ static void crash_handler(int sig, siginfo_t *info, void *context)
         x86_print_stack_trace(512);
     }
     fflush(stderr);
+}
+
+static void crash_handler(int sig, siginfo_t *info, void *context)
+{
+    crash_report(sig, info, context);
+    if (crash_log_path[0] != 0)
+    {
+        int fd = open(crash_log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd >= 0)
+        {
+            time_t now = time(NULL);
+            char date[32];
+            dup2(fd, 2);
+            close(fd);
+            fprintf(stderr, "\n%s", ctime_r(&now, date));
+            crash_report(sig, info, context);
+        }
+    }
     _exit(128 + sig);
 }
 
-EXTERNC void x86_install_crash_handler(void)
+/* log_path: the crash log file (an absolute path), or NULL */
+EXTERNC void x86_install_crash_handler(const char *log_path)
 {
     struct sigaction sa;
     static uint8_t alt_stack[65536];
     stack_t ss;
 
+    if (log_path != NULL) snprintf(crash_log_path, sizeof(crash_log_path), "%s", log_path);
     ss.ss_sp = alt_stack;
     ss.ss_size = sizeof(alt_stack);
     ss.ss_flags = 0;

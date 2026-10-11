@@ -147,7 +147,11 @@ example `REVENANT_`).
 | `<P>TRACE_LAG=1` | Once a second: game frames, game work time, screen updates and the time they block, mouse moves, key delay. Also a "slow" line for each event above its limit (`runtime/lag-trace.c`). |
 
 On a crash, the program prints the host and guest registers and a guest stack
-trace (only the first entry is always correct).
+trace (only the first entry is always correct). Since 2026-10-12 it also adds
+the report, with the date, to `crash.log` in the folder of the config file
+(`GAME_CONFIG_FILE`, for example `native-mac/Settings/crash.log`). An app
+that is opened from the Finder has no output that the user can read, and the
+port stops with `_exit`, so macOS makes no crash report.
 
 ## Tools (`tools/`)
 

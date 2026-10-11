@@ -31,7 +31,9 @@ own frames:
 | Frame rate | About 25 frames per second in the Keep, at about 20% of one CPU core. |
 | Process | arm64 only (no Rosetta). |
 
-Not tested yet: combat, spells, later areas, and long play sessions.
+Not tested yet: combat, spells and later areas. Long play: three 15-minute
+scripted walks with fights ran without a crash (2026-10-12, after the
+`memcpy` fix in "Port notes").
 
 3D renderer: the GOG `revenant.ini` has `Software3D=Yes`. With it, the game
 draws the 3D figures with its own software renderer ("Blue"), not with
@@ -75,6 +77,9 @@ use the same folder), and `revenant.ini`, `Curmap/`, `revboot.log` and
 `ss.bmp` go to `native-mac/Settings/`. The original game files stay as they
 are.
 
+If the game crashes, the report is added to `native-mac/Settings/crash.log`
+(with the date). Send that file with a bug report.
+
 ## Build
 
 From the repository root (once): `conda env create -f environment.yml`,
@@ -104,8 +109,9 @@ stops for another version). They are in `srw/`:
   not an address in `.data`.
 - `srw/llasm/instruction_replacements.sci`: four jumps into the middle of an
   instruction (`0x4b0f3d`, `0x4b0fa2`, `0x4b59c5`, `0x4b5a2a`), two `and`
-  with a code address, two `adc ah`, the `memcpy` tail entries, and the
-  broken multiplayer switch at `0x46190d`.
+  with a code address, two `adc ah`, the `memcpy` tail entries, the
+  `memcpy` backward-copy entries (see below), and the broken multiplayer
+  switch at `0x46190d`.
 - The MMX code (`0x43c...`) is not translated (139 traps). The game uses it
   only when CPUID reports MMX, and the runtime reports no MMX.
 - The game asks for DirectX 6: it gets IDirectDraw4 from DirectDraw 1 by
@@ -151,6 +157,21 @@ stops for another version). They are in `srw/`:
   before the redirect, and `FindFirstFileA` gives only the file name. The
   app with this fix was installed 2026-10-11; the app before it is in the
   Trash as "Revenant (Native) app before save picture fix (2026-10-11)".
+- The crash of 2026-10-12 (the game closed during play, exit code 138 =
+  128 + SIGBUS): the game's `memcpy` (`0x58b780`) and `memmove`
+  (`0x592230`) copy 4 to 28 bytes backward with `jmp [ecx*4 + table]`, with
+  `ecx` from -7 to 0 (`UnwindDownVec`). In the translated data, SRW puts the
+  table entries -7..-1 2 bytes too low (it aligns the label of entry 0, at
+  `0x58ba20` and `0x5924b0`), so the jump read half of one address and half
+  of the next one. The game uses these copies, for example, to insert into a
+  sorted list. Since 2026-10-12 the two jumps compare `ecx` with each index
+  and jump to the correct code without the table
+  (`srw/llasm/instruction_replacements.sci`; the targets match the tables
+  in the exe). Test 2026-10-12: three 15-minute scripted walks with fights
+  on copies of the saves, in background mode. Before the fix, one of them
+  crashed in less than 2 minutes; after the fix, all three ran to the end. The
+  app with this fix was installed 2026-10-12; the app before it is in the
+  Trash as "Revenant (Native) app before crash fix (2026-10-12)".
 - The game reads `GetDeviceIdentifier` into a 1064-byte DirectX 6 structure
   on its stack (a larger write breaks its return address).
 - The game draws its interface text with GDI on surfaces with

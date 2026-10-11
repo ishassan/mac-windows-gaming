@@ -21,7 +21,7 @@
 #include "ptr32.h"
 
 extern "C" void InputScript_Start(void);
-extern "C" void x86_install_crash_handler(void);
+extern "C" void x86_install_crash_handler(const char *log_path);
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
@@ -122,7 +122,16 @@ int main(int argc, char *argv[])
         return 1;
     }
     InputScript_Start();
-    x86_install_crash_handler();
+    {
+        /* crash.log next to the configuration file (native-mac/Settings) */
+        char cwd[2048], log_path[4096];
+        const char *slash = strrchr(GAME_CONFIG_FILE, '/');
+        if (getcwd(cwd, sizeof(cwd)) != NULL)
+            snprintf(log_path, sizeof(log_path), "%s/%.*scrash.log", cwd, slash ? (int)(slash + 1 - GAME_CONFIG_FILE) : 0, GAME_CONFIG_FILE);
+        else
+            log_path[0] = 0;
+        x86_install_crash_handler(log_path[0] ? log_path : NULL);
+    }
 
     atexit(SDL_Quit);
 
