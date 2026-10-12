@@ -57,9 +57,7 @@ change those files on your Mac.
 
   No start failed. On athei, full screen in Generals uses emulated display
   modes (`EmulateModeset`, see the Generals `prefix.reg`); the window and
-  full-screen values show that this costs no speed. An earlier Generals
-  value for athei (1.21 cores) came from Low detail (the My Documents
-  problem above) and is not valid. Generals on athei draws the ground
+  full-screen values show that this costs no speed. Generals on athei draws the ground
   correctly (Wine Stable 11.0 drew it white).
 - To compare with the native port without a window on the Mac, use the
   Linux test VM ([../../linux-test-vm](../../linux-test-vm/README.md)). It runs

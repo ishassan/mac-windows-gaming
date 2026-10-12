@@ -18,4 +18,4 @@ Hour/Saves/Zero Hour`). The old 2024 Windows save that gave "Error loading
 game" in the Wine versions loads since 2026-10-09, in both Wine versions. The
 cause was a GeneralsX save loaded before it in the same session, not the Wine
 save fix (see [other-versions/wine-11-athei](other-versions/wine-11-athei/README.md)
-and the check log of [open-source-port](open-source-port/README.md)).
+and the fork branch `fix/retail-save-compat` in [open-source-port](open-source-port/README.md)).

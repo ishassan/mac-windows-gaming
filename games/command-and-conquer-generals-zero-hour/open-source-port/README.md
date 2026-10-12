@@ -30,6 +30,26 @@ later), not the MIT license of this repository.
     - `fix/water-shader-assembler`: the water shaders (river, texbem water,
       trapezoid water with sparkles). The port had no shader assembler on
       macOS and Linux, so the water was drawn without these shaders.
+      Tested 2026-10-06: the menu water shows its sparkles, and the river
+      water inside a mission moves.
+    - `fix/load-retail-unicode-saves`: saves of the retail game (Windows)
+      store 2 bytes for each character of text, and the port (4-byte
+      `wchar_t` on macOS and Linux) showed broken names and could not load
+      them. The port now reads both widths and writes 2 bytes. Tested
+      2026-10-08: a Windows save loaded, and our native port loaded a new
+      save of the port (same map, units and money).
+    - `fix/retail-save-compat`: two fixes for the retail game.
+      (1) With the player observer option (on by default), the port keeps
+      ghost object pictures (buildings under the fog) for all players, and
+      saved all of them. The retail game loads them, but frees only those
+      of the local player, so every next load in the same session failed
+      with "Error loading game" (`ERROR_BAD_INI`). The port now saves the
+      pictures of the local player only. (2) The save header stored the
+      full Mac path of the map as its label; it now stores the file name
+      only (`getMapLeafName`). Tested 2026-10-09: a save written by the
+      fixed port loaded in our native port, and then a Windows save loaded
+      in the same session. Older saves of the port can be converted the
+      same way (keep only the local player's pictures).
   - `custom`: our own changes, plus a merge of each fix branch. It stays in
     the fork, and we build the app from it.
     - Cmd+Enter or Option+Enter switches between full screen and a window.
@@ -94,9 +114,8 @@ later), not the MIT license of this repository.
    gave "Error loading game". Our native port and the Wine versions also read
    those old saves (see `../native-mac/README.md` and
    `../wine-11-athei/save-fix/`).
-5. The original Porting Kit (Wine) version went to the Trash on 2026-10-03.
-   On 2026-10-05 the user asked for a Wine version again, to compare with the
-   native app when a problem occurs. It is in `other-versions/wine-11-athei/` and
+5. A Wine version is kept to compare with the native app when a problem
+   occurs (decided 2026-10-05). It is in `other-versions/wine-11-athei/` and
    `other-versions/wine-8/` (see "Wine version" below).
 6. Windows files (rule of 2026-10-05, for all games in `~/Games`): a file
    that no app uses goes to the Trash. A file that a native app needs stays
@@ -199,68 +218,6 @@ them again, in this order.
      `Saves/Zero Hour`, with 2 bytes for each character of its name
      (`xxd` of the first 0x40 bytes), and our native port must load it.
 
-## Check log
-
-- 2026-10-09: build of branch `fix/retail-save-compat` (two save fixes for
-  the retail game). (1) With the player observer option (on by default),
-  GeneralsX keeps ghost object pictures (buildings under the fog) for all
-  players and saved all of them. The retail game loads them, but frees only
-  those of the local player, so every next load in the same session failed
-  with "Error loading game" (`ERROR_BAD_INI`). Seen in Wine and in our
-  native port; it also fails with the unpatched `game.dat`. A copy of save
-  `00000017` that keeps only the local player's pictures did not cause the
-  failure.
-  The fix saves the pictures of the local player only. (2) The save header
-  stored the full Mac path of the map as its label; it now stores the file
-  name only (`getMapLeafName`). Tested with a test home folder: GeneralsX
-  loaded `00000017` and saved it again; the new save has pictures for the
-  local player only and the label `md_gla02.map`. Our native port
-  (offscreen, scripted input) loaded the new save, and then the Windows
-  save `00000010` in the same session. Installed. Then the older GeneralsX
-  saves `00000014` to `00000018` in `Saves/Zero Hour` were converted the
-  same way (only the local player's pictures, the map file name as label),
-  with a backup of the originals first.
-  The converted `00000015` loaded in our native port, and then `00000010`
-  in the same session.
-- 2026-10-08: build of fork commit `4c33825` (writes 2-byte text) tested
-  with a test copy of the settings and saves (`HOME=/tmp/gxhome`): the
-  Windows save "GLA 1" loaded, a new save had 2-byte text, and our native
-  port loaded it (same map, units and money). Installed. Then
-  `GeneralsZH/Save` became a link to `Saves/Zero Hour`; the load list shows
-  all 18 saves.
-- 2026-10-03: 1.0.2 installed and passed the security checks. Started from
-  the game folder: native ARM64, reached the main menu, and loaded `.big` files
-  from `Game Data`. Not tested yet: a new save written through the
-  `Settings and Saves` link.
-
-- 2026-10-06: build of branch `custom` (fork commit `5f02335`) tested in a
-  window, and then installed. ARM64; every library loads from inside the app;
-  the main menu shows the online entry; the intro plays in the window;
-  water shows its sparkles; Cmd+Enter switches to full screen and back; the
-  settings and saves did not change (19 files, same checksums). Not tested:
-  loading a save, and water inside a mission.
-
-- 2026-10-06, later: the installed build (`5f02335`) loaded the save "GLA 1",
-  saved once to a new file, and loaded that file again. River water inside
-  the mission moves. The 17 old save files did not change. Windows saves showed
-  broken names in the load list ("GA5" and boxes).
-
-- 2026-10-06: build of fork commit `a692659` (adds the save fix
-  `fix/load-retail-unicode-saves`) tested in a copy of the app, not installed.
-  The Windows saves show their real names, and the Windows save "GLA 5" loads
-  and plays. The Wine version loads the same save with the same state
-  ($6900).
-
-- 2026-10-06: the same build installed. ARM64; 47 `.big` files open from
-  `Game Data`; the load list shows the real names of the Windows saves; the
-  save "GLA 1" made by the native app loads and plays. Settings and saves did
-  not change (20 files, same checksums).
-
-- 2026-10-08: moved into `open-source-port/` of the new layout. Steps 4 and
-  5 applied to the installed app and it was signed again. The link in
-  `~/Library/Application Support` points to `open-source-port/Settings`.
-  Not started yet after the move.
-
 ## Camera in the main menu
 
 The camera height in the menu is the same as in the Wine version. The
@@ -278,9 +235,6 @@ version does not draw the menu frame.
   `MaxCameraHeight = 310` in place of 350 in `SagePatch.ini` (on a copy of
   the settings). The menu did not change in either test. The change was not
   kept.
-- An earlier note (also 2026-10-06) said that the menu camera is about 1.3
-  times higher. That came from pictures of different moments, and it is
-  wrong.
 - In a mission the two versions also look almost the same (same save,
   1024x768).
 
@@ -290,4 +244,4 @@ version does not draw the menu frame.
   directly to the main menu with no intro (3 of 3 starts). In window mode
   (`-win`) the intro plays. The shader cache file is not the cause. The user
   saw the intro one time in full screen, so the problem does not occur every
-  time. Cause not found yet. Reported as https://github.com/fbraz3/GeneralsX/issues/354, then closed by us the same day (not planned). Check again after each update.
+  time. Cause not found yet. Reported upstream as https://github.com/fbraz3/GeneralsX/issues/354 (closed, not planned). Check again after each update.

@@ -26,14 +26,13 @@ registry settings are the ones of `../wine-11-athei`.
 - `wineprefix`: a copy of the prefix as it was before the move to athei
   (2026-10-07). Do not open it with the athei Wine: athei updates a prefix,
   and the update cannot be undone.
-- `Settings/`: `revenant.ini` and `Curmap/` of this version (a copy of the shared ones of 2026-10-08).
+- `Settings/`: `revenant.ini` and `Curmap/` of this version.
 - The game files (`Original Game Files`) and the saves (`Saves`) are shared
   with the other versions.
 
 ## Display-mode fix (2026-10-09)
 
-The prefix has the same `_inmm.dll` as `../wine-11-athei` (the old file is
-kept as `_inmm.dll.bak-2026-03`). It scales the 640x480 picture to the 4:3
+The prefix has the same `_inmm.dll` as `../wine-11-athei`. It scales the 640x480 picture to the 4:3
 area of the screen (see "Display mode" in
 [../wine-11-athei/README.md](../wine-11-athei/README.md)). Wine 8 keeps the
 primary surface at the desktop size (1470x956) after the change to

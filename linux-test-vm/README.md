@@ -35,8 +35,8 @@ measured.
   exist on the Mac).
 - 5, Virtual Mac: a second macOS, run with `tart run --no-graphics` and
   controlled over `ssh`. It can use the same Mac Wine, so the pictures are
-  the same as in the Wine apps, 3D too. Tried on 2026-10-05, then removed.
-  Notes for a next try: `brew install cirruslabs/cli/tart` failed (the
+  the same as in the Wine apps, 3D too. Not set up. Notes for a setup:
+  `brew install cirruslabs/cli/tart` failed (the
   formula uses `depends_on macos:` outside `on_macos`), so use
   `gh release download -R cirruslabs/tart`. The image
   `ghcr.io/cirruslabs/macos-tahoe-base:latest` is a 27 GB download
@@ -121,13 +121,10 @@ cannot run 32-bit x86 code (a test that jumps to the 32-bit code segment
 fails with "rosetta error: invalid gdt selector index 4"), and all three
 games are 32-bit. FEX then runs every x86 program.
 
-`create` and `provision.sh` repeat the steps that made the VM on
-2026-10-05 (that VM was made step by step). Check of the scripts
-(2026-10-05): a second VM made with `create` (VM name changed in a copy of
-this folder) took about 10 minutes, received about 1.6 GB from the network
-(the Mac's network counter, so other traffic is included; the Ubuntu image
-is 0.95 GB of it), used 6.9 GB of disk, and showed the Revenant main menu
-in a test. That VM was then deleted.
+Test of the scripts (2026-10-05): a VM made with `create` took about 10
+minutes, received about 1.6 GB from the network (the Mac's network counter,
+so other traffic is included; the Ubuntu image is 0.95 GB of it), used 6.9
+GB of disk, and showed the Revenant main menu in a test.
 
 ## Results (2026-10-05, the Wine apps' own scripts and folders)
 
@@ -140,9 +137,6 @@ in a test. That VM was then deleted.
 | Commandos `mpserver.exe` | console server starts and shows its IP address |
 | Generals Zero Hour (Wine app) | 3D shell map behind the main menu |
 | Generals `WorldBuilder.exe` | starts (MFC42 works); after EA's license dialog the editor opens with the 3D terrain view and its tool windows |
-
-After the move of this kit into the repository (2026-10-05), the Revenant
-and Commandos tests reached the main menu again.
 
 Not tested in the VM: the native apps (they are Mac programs), and the
 Generals base game (`Generals.exe` needs the EA app).

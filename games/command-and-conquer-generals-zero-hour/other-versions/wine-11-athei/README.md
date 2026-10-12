@@ -52,14 +52,11 @@ are in [../../../../common/wine](../../../../common/wine/README.md).
   keeps the original as `game.dat.orig`; see the script for the details).
   It guesses the width of a save at its description (the first text of a
   save, before offset 0x200) and keeps that width for the other texts of
-  the same file. Applied to the `wine-11-athei` and `wine-8` prefixes on
-  2026-10-08: the load list showed readable names, and the newest GeneralsX
-  save loaded. Then the old 2024 Windows save `00000010.sav` gave "Error
-  loading game". The real cause was not this patch: it was a GeneralsX save
-  loaded before it in the same session (GeneralsX saved ghost object
-  pictures for all players, and the retail game frees only those of the
-  local player; see `open-source-port/README.md`, check log 2026-10-09).
-  The version of 2026-10-09 of this patch also guesses the width only at
+  the same file. Applied to the `wine-11-athei` and `wine-8` prefixes.
+  A save of GeneralsX made before its fix of 2026-10-09 can make the next
+  load in the same session fail ("Error loading game"); the cause and the
+  fix are in `open-source-port/README.md` (branch `fix/retail-save-compat`).
+  This patch guesses the width only at
   the description and keeps the width of two files at the same time
   (`save-fix/test/test.py` shows the old and the new behavior with
   synthetic files). Tested 2026-10-09 in both prefixes with the real game:

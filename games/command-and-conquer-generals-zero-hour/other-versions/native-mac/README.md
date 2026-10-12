@@ -9,8 +9,7 @@ replaces the Windows APIs. It uses no Wine, no Rosetta and no source code of
 the game. Direct3D 8 goes to DXVK (Direct3D to Vulkan) and MoltenVK (Vulkan
 to Metal), both native arm64 libraries.
 
-It started as a pilot (done 2026-10-07); the record of the work (time,
-problems, "source assists") is in [`PILOT-LOG.md`](PILOT-LOG.md). The
+The
 community port GeneralsX is in [`../../open-source-port`](../../open-source-port/README.md).
 
 Game data is not included. This repository never contains game files or

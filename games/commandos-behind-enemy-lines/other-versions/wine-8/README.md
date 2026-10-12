@@ -26,7 +26,7 @@ registry settings are the ones of `../wine-11-athei`.
 - `wineprefix`: a copy of the prefix as it was before the move to athei
   (2026-10-07). Do not open it with the athei Wine: athei updates a prefix,
   and the update cannot be undone.
-- `Settings/ddraw.ini`: the cnc-ddraw settings of this version (`fullscreen=true`, the same as wine-11-athei on 2026-10-08).
+- `Settings/ddraw.ini`: the cnc-ddraw settings of this version (`fullscreen=true`, the same as wine-11-athei).
 - The game files (`Original Game Files`) and the saves (`Saves`) are shared
   with the other versions.
 

@@ -54,20 +54,16 @@ The prefix uses cnc-ddraw (https://github.com/FunkyFr3sh/cnc-ddraw), a
 DirectDraw replacement, not the Wine DirectDraw:
 
 - `ddraw.dll` is in the prefix's `windows/syswow64` (the 32-bit system
-  folder). The installed file (2026-10-05): 358400 bytes, SHA-256
+  folder). The tested file: 358400 bytes, SHA-256
   `90babe01...bd13`, version info "cnc-ddraw", "DirectDraw replacement",
-  file version 6.0.0.0. It was copied on 2026-10-05 from the old Porting
-  Kit (Wineskin) app of Commandos. Which cnc-ddraw release this is was not
-  checked. For a new setup, get `ddraw.dll` from the cnc-ddraw releases
+  file version 6.0.0.0. Its cnc-ddraw release is not known. For a new setup, get `ddraw.dll` from the cnc-ddraw releases
   page.
 - DLL override: `ddraw=native,builtin`.
 - Direct3D renderer: `gl`.
 - Result: intro and main menu in full screen (Linux test VM, 2026-10-05).
 - On the Mac, the GOG `ddraw.ini` (`fullscreen=false`) shows a window. Since
   2026-10-07 the prefix's `ddraw.ini` has `fullscreen=true`: the picture
-  fills the screen (athei Wine, 19.9 frames per second in the mission). The
-  GOG file is kept next to it in `Settings` as `ddraw.ini.orig (window mode,
-  2026-10-07)`.
+  fills the screen (athei Wine, 19.9 frames per second in the mission).
 
 ## Set up again
 
@@ -96,7 +92,7 @@ the settings in it), not a recorded command history.
    `common/wine/make-app.sh games/commandos-behind-enemy-lines/other-versions/wine-11-athei/app "$HOME/Games/Commandos Behind Enemy Lines/other-versions/wine-11-athei" "$HOME/Games/Commandos Behind Enemy Lines/Original Game Files/goggame-1207662193.ico"`.
 9. Start the app. Start it before any other Wine program in this prefix:
    it sets the save folder link first, else the game writes its saves
-   into the Mac Documents folder (this happened once, on 2026-10-05).
+   into the Mac Documents folder.
 
 Check (2026-10-05): in a new prefix in the Linux test VM, `prefix.reg`
 imports with the same values as the installed prefix. `make-app.sh` makes an app that is the same as the

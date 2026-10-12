@@ -58,9 +58,8 @@ All come from the GOG install. The DLLs must stay next to `Revenant.exe`.
 
 ## Set up again
 
-These are the steps for a new prefix. The prefix of 2026-03 was made in
-earlier sessions, so this list repeats its result (the files and the
-settings in it), not a recorded command history.
+These are the steps for a new prefix. They repeat the result of a working
+prefix (the files and the settings in it), not a recorded command history.
 
 1. Install Wine: `common/wine/install-athei.sh` (the athei CrossOver 26.3
    build, see [`common/wine`](../../../../common/wine/README.md)). In the steps
@@ -208,8 +207,7 @@ the primary is a present, so this made three presents per frame, and some
 VM screenshots were black. Now the bars are drawn for a new primary and then
 at every 64th frame.
 
-On the Mac (2026-10-09): installed in the real prefixes of both Wine
-versions (the old file is kept as `_inmm.dll.bak-2026-03` next to it). The
+On the Mac (2026-10-09), in the prefixes of both Wine versions: the
 user started both apps and reported that the picture fills the screen
 (the logs show the 4:3 area, 800x600 at x=80 on the 960x600 display).
 Wine 8 needed one more change:
@@ -273,8 +271,7 @@ port reads this value as `No` and draws the figures with Direct3D.
   `_inmm_real.dll` (86016 bytes, SHA-256 `7ff2f56d...67aa`) must be in
   `C:\Revenant`.
 - The picture is small or cut: look for "Scaling on" and "Present:" in
-  `dispmode_fix.log`. To go back to the old result, copy
-  `_inmm.dll.bak-2026-03` to `_inmm.dll`, or set `Stretch=0` in
+  `dispmode_fix.log`. To go back to the unscaled picture, set `Stretch=0` in
   `dispmode_fix.ini`.
 - The game hangs at the start with no sound: the Miles fix is missing.
 - No window in front: use Cmd+Tab or Mission Control to find the Wine
@@ -284,6 +281,6 @@ port reads this value as `No` and draws the figures with Direct3D.
   the version), with the values of that window: with the device "DirectDraw
   HAL" it sets `Software3D=No`, removes the empty lines and adds keys
   (`DisplayMode`, `Detail` and more). Keep a copy of `revenant.ini` before
-  you use the launcher (seen on 2026-10-05; the file was put back).
+  you use the launcher (seen on 2026-10-05).
 - Revenant in the Linux test VM crashed in `smackw32.dll` without a sound
   device (see `linux-test-vm/README.md`).

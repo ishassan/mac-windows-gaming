@@ -26,7 +26,7 @@ registry settings are the ones of `../wine-11-athei`.
 - `wineprefix`: a copy of the prefix as it was before the move to athei
   (2026-10-07). Do not open it with the athei Wine: athei updates a prefix,
   and the update cannot be undone.
-- `Settings/`: My Documents of this version (options, maps, replays; a copy of the wine-11-athei one of 2026-10-08). Its `Save` folders are links to the shared `Saves`.
+- `Settings/`: My Documents of this version (options, maps, replays). Its `Save` folders are links to the shared `Saves`.
 - Full screen works without `EmulateModeset` on Wine 8 (the setting in `../wine-11-athei/prefix.reg` is for athei). On Wine 8 the full-screen picture is a window layer at 1280x800.
 - The game files (`Original Game Files`) and the saves (`Saves`) are shared
   with the other versions.

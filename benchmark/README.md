@@ -22,9 +22,7 @@ results of different days can be compared. They compare:
 - All versions of a game use the same game settings: `setup.sh` copies the
   `wine-11-athei` settings into the other versions of the copy (Generals:
   `Options.ini`, High, 1280x800; Revenant: `revenant.ini` with
-  `Windowed=No`; Commandos: `ddraw.ini`). (On
-  2026-10-07 an earlier test let athei read other options at Low detail; its
-  Generals result was not valid.)
+  `Windowed=No`; Commandos: `ddraw.ini`).
 - The same input script drives the native port and the Wine version
   (`scripts/`). In Wine, small helper programs play it (`helpers/`, built by
   `setup.sh` with `i686-w64-mingw32-gcc`).
