@@ -83,9 +83,10 @@ desktop. A minimized window is not drawn.
 ```
 linux-test-vm/vm.sh create      # once: make the VM (see "Make the VM")
 linux-test-vm/vm.sh start       # start the VM and the screen :99
-KEYS=/opt/games-vm/keys/revenant-menu.txt \
-  linux-test-vm/vm.sh test revenant 50 "$HOME/Games/Revenant/other-versions/wine-11-athei/Revenant (Wine).app/Contents/MacOS/Revenant"
-linux-test-vm/vm.sh shots revenant
+linux-test-vm/vm.sh test commandos 60 /opt/games-vm/guest/runexe.sh \
+  "$HOME/Games/Commandos Behind Enemy Lines/other-versions/wine-11-athei/wineprefix" \
+  "GOG Games/Commandos" comandos.exe
+linux-test-vm/vm.sh shots commandos
 linux-test-vm/vm.sh stop
 ```
 
@@ -98,9 +99,11 @@ linux-test-vm/vm.sh stop
   files in `keys/` reach the main menu (or the screen in the file name).
 - `shots <name>` copies the pictures to
   `~/Library/Caches/games-linux-vm/shots/<name>/`.
-- A program that is not a Wine app: `guest/runexe.sh <prefix> "<folder
-  under drive_c>" <exe>`. It starts the program from its own folder, as the
-  Wine apps do.
+- Start a game with `guest/runexe.sh <prefix> "<folder under drive_c>"
+  <exe>`. It starts the program from its own folder, as the Wine apps do.
+  Do not start the Wine app itself (`<app>.app/Contents/MacOS/...`): its
+  script looks for the Mac Wine (the athei Wine in `~/Applications`, or
+  Homebrew Wine 8), which is not in the VM, so the screen stays black.
 - `refresh` makes a new copy of `~/Games` after a change on the Mac (stop
   the VM first). `shell [command]` opens a shell in the VM.
 - The first start of a fresh copy updates each Wine prefix to Wine 11
