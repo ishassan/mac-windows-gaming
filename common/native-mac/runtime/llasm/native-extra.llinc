@@ -97,3 +97,7 @@ func x86_lock_bts0 *addr
 ; Generals Zero Hour (games/command-and-conquer-generals-zero-hour/other-versions/native-mac/runtime/llasm/xfer-unicode.c):
 ; read the characters of a save-file Unicode string of either width; 1 in tmp0 when done
 func generals_xfer_read_unicode self, *buffer, size
+
+; Commandos (games/commandos-behind-enemy-lines/native-mac/runtime/llasm/briefing-hold.c):
+; countdown of a briefing step; 1 in tmp0 while the step must wait
+func commandos_briefing_countdown self

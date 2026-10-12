@@ -23,6 +23,7 @@ Single-player works. These items were tested with scripted input
 | Mission 1 | Plays: the camera tour, select a commando, walk, Ctrl+B briefing. |
 | Frame rate | 20 frames per second in the mission (the game's own limit is 50 ms per frame). |
 | End of mission 1, (N)ext mission | Works: the mission 2 briefing and map load. |
+| Mission 2 briefing (2026-10-12) | The second voice starts 11 seconds after the first voice ends, and the briefing goes on to the mission. Before the briefing change (see "How it works"), it started 82 seconds after. |
 | In-game menu (Escape), Save Game into a slot | Works. The file `SAVE0000.SAV` is written. |
 | Quick save (Ctrl+S) and quick load (Ctrl+L) | Work. `QLOAD.SAV` is written and read back. |
 | Saves between the native app and the Wine version (2026-10-06) | Work both ways. A native quick save of the river mission (save slot 3) loaded in Wine 8 after mission 1, and a Wine 8 quick save of mission 1 loaded in the native app after the river mission. |
@@ -131,6 +132,17 @@ shared: see [common/native-mac/README.md](../../../common/native-mac/README.md).
   flags). `../../../common/native-mac/tools/check_flags.py` finds these places at each build,
   and `srw/llasm/instruction_flags.sci` fixes them. One of them (at
   `0x60F2E4`) made the game crash after mission 1.
+- Port change (2026-10-12): the briefing script keeps the first picture of
+  each mission briefing for a fixed count of frames after its voice starts,
+  for example `1800 STARTWAVE #B02H.WAV` in mission 2. The game shows the
+  briefing at 20 frames per second, so this is 90 seconds, but the voice is
+  22 seconds long. The picture then stayed without sound for more than a
+  minute, and the briefing looked stopped. The other briefings keep the
+  picture 30 to 60 seconds for voices of 13 to 38 seconds. The original code
+  has the same counts (seen in the code, not compared with the Wine version).
+  `runtime/llasm/briefing-hold.c` replaces the frame countdown of the script
+  steps (`0x589BF0`): a voice step stops its count 2 seconds after its
+  voice ends. Other steps are not changed.
 
 ## License and credits
 
