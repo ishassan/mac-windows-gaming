@@ -12,7 +12,6 @@ Our own native port of the original exe is in [../other-versions/native-mac](../
 - The app is a community port of the game, built on the source code that EA
   released. Its project name is "GeneralsX" (https://github.com/fbraz3/GeneralsX).
   We use this name only here and in fixed paths that the app requires.
-- Installed version: 1.0.2 (release date 2026-09-28).
 - Download file: `macOS-GeneralsXZH.zip` from the GitHub release page.
 - The game data comes from the original Origin copy (base game and Zero Hour).
 
@@ -53,22 +52,6 @@ later), not the MIT license of this repository.
 - The build uses the Homebrew `ffmpeg` and `libpng` of this Mac if they are
   installed, as the official release does. The bundle step copies them into
   the app, so the app itself does not need Homebrew.
-- The app that is installed now is the build of fork commit `81a31b7`
-  (branch `custom`, with the Cmd+Q change), built with `make-app.sh` and
-  installed 2026-10-09. Later on 2026-10-09 its `Contents/MacOS/run.sh`
-  got the change of fork commit `5536e07` (no `-win`, so full screen) by
-  hand, in place of a rebuild, and the app was signed (`codesign -s -
-  --force`; before that it had no signature). Only `run.sh` and the new
-  `_CodeSignature` folder changed; Saves and Settings did not. The old
-  `run.sh` is in the Trash as "Command & Conquer Generals Zero Hour run.sh
-  before full screen default (2026-10-09)". The build before it (`9555140`, fork commit
-  `4c5c39c` of branch `fix/retail-save-compat` merged into `custom`) went
-  to the Trash on 2026-10-09 as "Command & Conquer Generals Zero Hour app
-  before Cmd+Q fix (2026-10-09)". The build `4c33825` is
-  `generals-open-source-port-app-before-ghost-fix.app`, and the build `a692659` is `generals-open-source-port-app-before-save-fix`,
-  both in `~/Library/Caches/games-reorg-backup-2026-10-08`. The build `5f02335`
-  went to the Trash on 2026-10-08, and the downloaded 1.0.2 app on
-  2026-10-06.
 - The build step also makes the app self-contained: it points MoltenVK at the
   C++ library of macOS and removes the paths to build folders from every
   file. Without this, the app loaded `libc++` from the conda env.
@@ -215,7 +198,6 @@ them again, in this order.
    - Load a save, then save once. The new file must appear in
      `Saves/Zero Hour`, with 2 bytes for each character of its name
      (`xxd` of the first 0x40 bytes), and our native port must load it.
-6. Update the "Installed version" line in this file.
 
 ## Check log
 
@@ -237,8 +219,7 @@ them again, in this order.
   save `00000010` in the same session. Installed. Then the older GeneralsX
   saves `00000014` to `00000018` in `Saves/Zero Hour` were converted the
   same way (only the local player's pictures, the map file name as label),
-  with the originals backed up in
-  `~/Library/Caches/games-reorg-backup-2026-10-08/saves-before-convert-2026-10-09`.
+  with a backup of the originals first.
   The converted `00000015` loaded in our native port, and then `00000010`
   in the same session.
 - 2026-10-08: build of fork commit `4c33825` (writes 2-byte text) tested

@@ -142,9 +142,7 @@ stops for another version). They are in `srw/`:
   game started no sound at all, and a conversation showed its text with no
   speech. Since 2026-10-11 a sound with no frames ends at once
   (`Mixer_Start` in `audio-mixer.c`), the end-of-sample callback comes,
-  and the game uses the handle again. The app with this fix was installed
-  2026-10-11; the app before it is in the Trash as "Revenant (Native) app
-  before voice fix (2026-10-11)".
+  and the game uses the handle again.
 - The save picture: the game writes `ss.bmp` into its folder (the port
   sends it to `native-mac/Settings`), then checks
   `FindFirstFileA(".\ss.bmp")` and copies the file with the name from
@@ -154,9 +152,7 @@ stops for another version). They are in `srw/`:
   the whole found path (`../native-mac/Settings/ss.bmp`), not only the
   file name as Windows does (the copy then failed, and the game tried
   again without end). Since 2026-10-11 `CLIB_FindFile` removes `./` parts
-  before the redirect, and `FindFirstFileA` gives only the file name. The
-  app with this fix was installed 2026-10-11; the app before it is in the
-  Trash as "Revenant (Native) app before save picture fix (2026-10-11)".
+  before the redirect, and `FindFirstFileA` gives only the file name.
 - The crash of 2026-10-12 (the game closed during play, exit code 138 =
   128 + SIGBUS): the game's `memcpy` (`0x58b780`) and `memmove`
   (`0x592230`) copy 4 to 28 bytes backward with `jmp [ecx*4 + table]`, with
@@ -169,9 +165,7 @@ stops for another version). They are in `srw/`:
   (`srw/llasm/instruction_replacements.sci`; the targets match the tables
   in the exe). Test 2026-10-12: three 15-minute scripted walks with fights
   on copies of the saves, in background mode. Before the fix, one of them
-  crashed in less than 2 minutes; after the fix, all three ran to the end. The
-  app with this fix was installed 2026-10-12; the app before it is in the
-  Trash as "Revenant (Native) app before crash fix (2026-10-12)".
+  crashed in less than 2 minutes; after the fix, all three ran to the end.
 - The game reads `GetDeviceIdentifier` into a 1064-byte DirectX 6 structure
   on its stack (a larger write breaks its return address).
 - The game draws its interface text with GDI on surfaces with
@@ -185,9 +179,7 @@ stops for another version). They are in `srw/`:
   port's rasterizer used centers at x + 0.5 and y + 0.5 until 2026-10-11,
   which sampled exactly on the edges between texels: rounding then doubled
   some rows and columns and dropped others. Since 2026-10-11 it uses the
-  Direct3D rule (`raster_triangle` in `WinApi-d3d.c`). The app with this fix was
-  installed 2026-10-11; the app before it is in the Trash as "Revenant
-  (Native) app before text fix (2026-10-11)".
+  Direct3D rule (`raster_triangle` in `WinApi-d3d.c`).
 
 ## License and credits
 

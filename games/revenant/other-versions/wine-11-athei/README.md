@@ -268,9 +268,8 @@ port reads this value as `No` and draws the figures with Direct3D.
 ## Problems
 
 - `DDERR_GENERIC`: the display-mode fix did not load. Look at
-  `dispmode_fix.log`. `_inmm.dll` (installed 2026-10-09: 59904 bytes,
-  SHA-256 `e1c4ca3b...7a7c`; the file of 2026-03, 112358 bytes, SHA-256
-  `c6f4161b...9494`, is kept as `_inmm.dll.bak-2026-03`) and
+  `dispmode_fix.log`. `_inmm.dll` (59904 bytes,
+  SHA-256 `e1c4ca3b...7a7c`) and
   `_inmm_real.dll` (86016 bytes, SHA-256 `7ff2f56d...67aa`) must be in
   `C:\Revenant`.
 - The picture is small or cut: look for "Scaling on" and "Present:" in
