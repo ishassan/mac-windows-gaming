@@ -24,6 +24,11 @@ the game.
     the setting `joy_triggerThreshold` (default 0.15, the same as
     `joy_threshold`). In `code/sdl/sdl_input.c`. It can become a pull
     request too.
+  - `fix/joystick-zoom-sensitivity`: the stick turns slower while zoomed
+    in (a rifle scope), with the same scale as the mouse
+    (`CG_SensitivityScale()`, the vertical view angle / 75). Before, the
+    stick turned at the same degrees per second in the scope, so the view
+    moved about 4 times too fast. In `code/client/cl_input.cpp`.
   - `custom`: the tag `v0.82.1` plus a merge of each fix branch. We build the
     apps from it.
 - The libraries SDL2, OpenAL and curl: from the OpenMoHAA v0.82.1 release
@@ -137,12 +142,15 @@ Square `X`, Triangle `Y`, SHARE `BACK`, OPTIONS `START`):
 | Touchpad, SHARE, OPTIONS | health or binoculars, scores, menu |
 
 Right stick speed: the turn speed is `j_yaw` (left and right) or `j_pitch`
-(up and down) x 32767 degrees per second at full stick, in a straight line
-from the dead zone. The engine default, 0.022 (about 720 degrees per
-second), was much too fast with a PS4 controller (2026-10-18), so
-`controller.cfg` sets `j_yaw -0.0055` and `j_pitch 0.004` (about 180 and
-130 degrees per second). `controller.cfg` runs after the player config, so
-its values win at each start.
+(up and down) x 32767 x the zoom scale degrees per second at full stick, in
+a straight line from the dead zone. The zoom scale is the vertical view
+angle / 75: about 0.86 with no zoom at `cg_fov 80`, much less in a rifle
+scope (the fork branch `fix/joystick-zoom-sensitivity`). The engine default,
+0.022 (about 620 degrees per second with no zoom), was much too fast with a
+PS4 controller (2026-10-18), so `controller.cfg` sets `j_yaw -0.0064` and
+`j_pitch 0.0047` (about 180 and 130 degrees per second with no zoom).
+`controller.cfg` runs after the player config, so its values win at each
+start.
 
 Trigger dead zone: `controller.cfg` sets `joy_triggerThreshold 0.8` (the
 fork's setting; `joy_threshold` 0.15 stays for the sticks). Measured
