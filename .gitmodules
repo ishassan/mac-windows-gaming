@@ -1,3 +1,7 @@
 [submodule "command-and-conquer-generals-zero-hour/native-mac/GeneralsX"]
 	path = games/command-and-conquer-generals-zero-hour/open-source-port/GeneralsX
 	url = https://github.com/ishassan/GeneralsX.git
+[submodule "games/medal-of-honor-allied-assault/open-source-port/openmohaa"]
+	path = games/medal-of-honor-allied-assault/open-source-port/openmohaa
+	url = https://github.com/ishassan/openmohaa.git
+	branch = custom

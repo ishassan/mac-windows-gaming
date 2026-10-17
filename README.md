@@ -63,7 +63,7 @@ the repository has a script that makes the change on your own copy.
 | Commandos: Behind Enemy Lines (1998) | [native-mac](games/commandos-behind-enemy-lines/native-mac/): our native port. Single-player works: videos, menus, missions, save and load. | [wine-11-athei](games/commandos-behind-enemy-lines/other-versions/wine-11-athei/), [wine-8](games/commandos-behind-enemy-lines/other-versions/wine-8/) |
 | Revenant (1999) | [native-mac](games/revenant/native-mac/): our native port. Single-player works: intro video, menus, new game, walking and talking, load and save, music. Not played to the end. | [wine-11-athei](games/revenant/other-versions/wine-11-athei/), [wine-8](games/revenant/other-versions/wine-8/) |
 | Command & Conquer Generals Zero Hour (2003) | [open-source-port](games/command-and-conquer-generals-zero-hour/open-source-port/): GeneralsX, the community port built from the source code that EA released (not ours; our fork of it is the submodule `GeneralsX/`, branch `custom`). Plays. | [native-mac](games/command-and-conquer-generals-zero-hour/other-versions/native-mac/) (our recompile of the 1.04 exe, Direct3D 8 on DXVK and MoltenVK: menus, 3D menu scene, skirmish (10 minutes), campaign start), [wine-11-athei](games/command-and-conquer-generals-zero-hour/other-versions/wine-11-athei/), [wine-8](games/command-and-conquer-generals-zero-hour/other-versions/wine-8/) |
-| Medal of Honor: Allied Assault (2002), with Spearhead and Breakthrough | [open-source-port](games/medal-of-honor-allied-assault/open-source-port/): OpenMoHAA, a community engine (not ours). This repository has the setup only: launcher, controller and Cmd+Enter settings, and the scripts that take the data out of the GOG installer. Main menu tested. | none |
+| Medal of Honor: Allied Assault (2002), with Spearhead and Breakthrough | [open-source-port](games/medal-of-honor-allied-assault/open-source-port/): OpenMoHAA, a community engine (not ours; our fork of it is the submodule `openmohaa/`, branch `custom`, with Cmd+Enter for full screen). This repository has the setup: launcher, controller settings, and the scripts that build the engine and take the data out of the GOG installer. Plays. | none |
 
 All versions of a game read the same saves (Generals: since 2026-10-08,
 see [the GeneralsX notes](games/command-and-conquer-generals-zero-hour/open-source-port/README.md)).
@@ -143,6 +143,6 @@ checksums) before a test.
 - The games belong to their owners: Commandos (Pyro Studios), Revenant
   (Cinematix Studios, Eidos Interactive), Command & Conquer Generals Zero
   Hour and Medal of Honor: Allied Assault (Electronic Arts).
-- OpenMoHAA (the engine of the Medal of Honor apps) is not in this
-  repository: `make-app.sh` downloads its release. It has its own license
-  (GPL 2 or later).
+- OpenMoHAA (the engine of the Medal of Honor apps): our fork is a
+  submodule, and `make-app.sh` downloads the release for its libraries. It
+  has its own license (GPL 2 or later).

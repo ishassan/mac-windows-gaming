@@ -3,17 +3,33 @@
 The game runs natively on Apple Silicon with OpenMoHAA, a community engine
 for Medal of Honor: Allied Assault, Spearhead and Breakthrough
 (https://github.com/openmoh/openmohaa, GPL 2 or later). It is not our port:
-this folder holds the setup only. The engine reads the game data (the `.pk3`
+this folder holds the setup, and our fork of the engine is the submodule
+`openmohaa/`. The engine reads the game data (the `.pk3`
 files) of the original game. No Windows program runs, also not to install
 the game.
 
 ## Source of the app
 
-- OpenMoHAA v0.82.1 (released 2025-08-05), the release file
-  `openmohaa-v0.82.1-macos-multiarch-arm64-x86_64.zip` (10,588,420 bytes,
-  SHA-256 `dd590e88...a59e579a`, the same as the digest on the GitHub
-  release page). It holds `openmohaa`, `game.dylib`, `cgame.dylib` and the
-  libraries (SDL2, OpenAL, curl), for arm64 and x86_64. It has no `.app`.
+- The engine: our fork of OpenMoHAA, https://github.com/ishassan/openmohaa
+  (made on 2026-10-18 from `openmoh/openmohaa`), the git submodule
+  `openmohaa/` in this folder. The fork has the license of OpenMoHAA (GPL 2
+  or later), not the MIT license of this repository. Get the files with
+  `git submodule update --init`. Branches (both start from the tag `v0.82.1`,
+  commit `a72bc153`, the source of the v0.82.1 release):
+  - `fix/cmd-enter-fullscreen`: Cmd+Enter switches between full screen and a
+    window, as Alt+Enter (Option+Enter) does. One line in
+    `code/client/cl_keys.cpp`. It can become a pull request to
+    `openmoh/openmohaa`.
+  - `fix/trigger-threshold`: a separate dead zone for the two triggers,
+    the setting `joy_triggerThreshold` (default 0.15, the same as
+    `joy_threshold`). In `code/sdl/sdl_input.c`. It can become a pull
+    request too.
+  - `custom`: the tag `v0.82.1` plus a merge of each fix branch. We build the
+    apps from it.
+- The libraries SDL2, OpenAL and curl: from the OpenMoHAA v0.82.1 release
+  file `openmohaa-v0.82.1-macos-multiarch-arm64-x86_64.zip` (10,588,420
+  bytes, SHA-256 `dd590e88...a59e579a`, the same as the digest on the GitHub
+  release page). They are built for macOS with no other dependencies.
 - The game data: the GOG version, "Medal of Honor: Allied Assault War Chest"
   (the base game and both expansion packs). Use the offline installer from the
   GOG library ("Download offline backup game installers", Windows):
@@ -24,17 +40,19 @@ the game.
 
 | File | What it does |
 |---|---|
-| `make-app.sh [installer]` | Downloads the release (once, into `build/`), checks its SHA-256, and makes the three apps in `build/`. With the GOG installer, the apps get the game icons from it. |
+| `make-app.sh [installer]` | Builds the engine from `openmohaa/` (CMake and Ninja, arm64, about 1 minute), downloads the release (once, into `build/`) for its libraries and checks its SHA-256, and makes the three apps in `build/`. With the GOG installer, the apps get the game icons from it. |
 | `app/start.sh`, `app/Info.plist` | The launcher and `Info.plist` of the apps. `make-app.sh` puts in the app name and the game number. |
 | `extract-game-files.sh <installer> <game folder>` | Takes the data out of the installer with `innoextract` and sorts it (see "Game files"). |
 | `install.sh <game folder>` | Puts the apps from `build/` into `<game folder>/open-source-port/`, and makes the `Settings` folder, the save links and the shortcuts. |
 | `controller.cfg` | The buttons of the PS4 controller (DUALSHOCK 4). |
-| `mac-keys.cfg` | Cmd+Enter: full screen or window. |
+| `mac-keys.cfg` | Removes the Cmd and Enter binds of an earlier version of this file (the player config keeps binds). |
 | `mkalias.swift` | Makes the Finder aliases with the bookmark API of Foundation, so Finder does not come to the front. |
 
 ## Set up
 
 ```sh
+git submodule update --init                          # in the repository root, once
+conda env update -f environment.yml                  # the build tools, in the repository root
 cd games/medal-of-honor-allied-assault/open-source-port
 G="$HOME/Games/Medal of Honor Allied Assault"
 I="<folder of the installer>/setup_medal_of_honor_2.0.0.21.exe"
@@ -59,7 +77,9 @@ The result:
 
 ## How the apps work
 
-- Each app holds a copy of the release files in `Contents/MacOS` (27 MB), and
+- Each app holds the engine built from the fork (`openmohaa`, `game.dylib`,
+  `cgame.dylib`, arm64) and the three release libraries in `Contents/MacOS`
+  (16 MB), and
   `start` as its program. `start` finds the game folder (the nearest folder
   above with `Original Game Files`) and starts `openmohaa` with:
   - `+set com_target_game 0`, `1` or `2` (Allied Assault, Spearhead,
@@ -75,7 +95,6 @@ The result:
     own configs (`default.cfg`, the player config, `autoexec.cfg`).
 - The saves go to `<fs_homepath>/<main|mainta|maintt>/save/<player>`, so
   `Settings/<game>/save` is a link to `Saves/<game>`.
-- The release zip loses the exec bit of `openmohaa`. `make-app.sh` sets it.
 - The apps are signed ad hoc (`codesign --force --deep -s -`).
 - The engine starts in full screen at the screen size of the Mac
   (`r_mode -2`, `r_fullscreen 1`).
@@ -117,17 +136,43 @@ Square `X`, Triangle `Y`, SHARE `BACK`, OPTIONS `START`):
 | D-pad | rifle (up), submachine gun (right), pistol (left), grenade (down) |
 | Touchpad, SHARE, OPTIONS | health or binoculars, scores, menu |
 
+Right stick speed: the turn speed is `j_yaw` (left and right) or `j_pitch`
+(up and down) x 32767 degrees per second at full stick, in a straight line
+from the dead zone. The engine default, 0.022 (about 720 degrees per
+second), was much too fast with a PS4 controller (2026-10-18), so
+`controller.cfg` sets `j_yaw -0.0055` and `j_pitch 0.004` (about 180 and
+130 degrees per second). `controller.cfg` runs after the player config, so
+its values win at each start.
+
+Trigger dead zone: `controller.cfg` sets `joy_triggerThreshold 0.8` (the
+fork's setting; `joy_threshold` 0.15 stays for the sticks). Measured
+2026-10-18 on the PS4 controller of this Mac, with R2 not touched: R2 read
+47 to 63 percent of its travel (L2 0), and 100 percent when pressed. With
+the old dead zone the game saw R2 as held: each switch between full screen
+and window opens the controller again (`IN_Restart`), the game saw a new R2
+press and fired. With 0.8, a test with 6 switches gave no R2 press.
+
 The menus need the trackpad or mouse. The engine finds a controller that is
 connected after the start (`SDL_CONTROLLERDEVICEADDED`).
 
-## Cmd+Enter
+## Full screen or window
 
-The engine has no key to switch between full screen and a window, and a bind
-cannot have a modifier. `mac-keys.cfg` binds Cmd (`COMMAND`) to a hold alias:
-while Cmd is down, Enter and keypad Enter run
-`toggle r_fullscreen; vid_restart`. When Cmd is up, Enter is free again. No
-config of the game binds ENTER, KP_ENTER or COMMAND. In the menus the keys
-go to the menu, so it works only during play.
+Press Cmd+Enter or Option+Enter.
+
+- Option+Enter is the engine's own key: in `CL_KeyEvent`
+  (`code/client/cl_keys.cpp`), Alt+Enter calls `Key_ClearStates()` and
+  `Cvar_SetValue("r_fullscreen", ...)`. `Cvar_SetValue` changes the latched
+  setting at once, and `GLimp_EndFrame` changes the window with
+  `SDL_SetWindowFullscreen`, with no restart. Tested 2026-10-18 with the
+  release build: 4 presses, 4 changes, both ways.
+- Cmd+Enter: the fork branch `fix/cmd-enter-fullscreen` adds `K_COMMAND` to
+  the same check, so Cmd+Enter does the same thing.
+- A settings file cannot do this. The first version of `mac-keys.cfg` used a
+  hold alias on Cmd that bound Enter to `toggle r_fullscreen; vid_restart`
+  (`toggle` cannot change a latched setting at once). After `vid_restart`
+  the game got only key-up events for Cmd, so the second Cmd+Enter did
+  nothing (tested 2026-10-18). `mac-keys.cfg` now removes those binds,
+  because the player config keeps them.
 
 ## Tests
 
@@ -141,8 +186,7 @@ mode only (see `CLAUDE.md`). To keep the real settings unchanged, start
 - 2026-10-17: the main menu showed, in a window (`r_fullscreen 0`, `r_mode
   4`). The log showed the data of `Original Game Files/main` (18,297 files in
   the packs), "GL_RENDERER: Apple M2" and "execing controller.cfg". No
-  controller was connected ("0 possible joysticks"), so the buttons are not
-  tested yet. Cmd+Enter is not tested yet.
-- 2026-10-17: the three scripts gave the same result as the same setup done
+  controller was connected ("0 possible joysticks"), so the buttons were not
+  tested then. - 2026-10-17: the three scripts gave the same result as the same setup done
   step by step: the apps were the same byte for byte, and the game folder had
   the same file list.
