@@ -23,6 +23,9 @@ Tests with no window:
   game frames. See [common/native-mac/README.md](common/native-mac/README.md).
 - Generals native port: `GENERALSZH_BACKGROUND=offscreen`. See
   [its README](games/command-and-conquer-generals-zero-hour/other-versions/native-mac/README.md).
+- Medal of Honor (OpenMoHAA): no mode without a window, so tests wait for
+  normal mode. Use a test `fs_homepath` (see
+  [its README](games/medal-of-honor-allied-assault/open-source-port/README.md)).
 - Wine, start test (no picture): the null display driver in an APFS copy of
   the prefix. Never change the real prefix. See "Test methods" in
   [common/wine/README.md](common/wine/README.md).

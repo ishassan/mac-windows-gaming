@@ -4,8 +4,10 @@ Native Apple Silicon (arm64) ports of classic Windows games. Each port
 recompiles the game's own x86 program to arm64 and replaces the Windows APIs
 with a native layer. The ports use no Wine, no emulator and no Rosetta.
 
-Each game also has the setup of its original Windows version on Wine. We
-use it only as a reference, to compare with the native version.
+Most games also have the setup of their original Windows version on Wine.
+We use it only as a reference, to compare with the native version. Where a
+community engine or port exists (Generals, Medal of Honor), we use it as the
+version to play.
 
 Each game has its own folder in `games/`, named with the official game name in
 lowercase with hyphens (spaces break the build rules). The folder shows the
@@ -15,7 +17,7 @@ keep them to test and to compare when there is a problem.
 ```
 games/<game>/
 ├── README.md               which version to play, and the other versions
-├── native-mac/             the version to play: our native port (Generals: open-source-port/)
+├── native-mac/             the version to play: our native port (Generals, Medal of Honor: open-source-port/)
 └── other-versions/
     ├── wine-11-athei/      the Windows version on the athei Wine (the default Wine):
     │                       the app, the registry settings, the patches, the setup steps
@@ -34,8 +36,8 @@ On the Mac, each game folder in `~/Games` has the same layout:
 ~/Games/<Game name>/
 ├── Original Game Files     the files of the GOG or EA install (shared by all versions)
 ├── Saves                   the saves (shared by the versions that can read them)
-├── native-mac              <Game> (Native).app, Settings/ (Generals: open-source-port,
-│                           the GeneralsX app and its Settings/)
+├── native-mac              <Game> (Native).app, Settings/ (Generals and Medal of Honor:
+│                           open-source-port, the app of the community port and its Settings/)
 └── other-versions
     ├── wine-11-athei       <Game> (Wine).app, wineprefix/, Settings/
     ├── wine-8              <Game> (Wine 8).app, wineprefix/, Settings/
@@ -61,6 +63,7 @@ the repository has a script that makes the change on your own copy.
 | Commandos: Behind Enemy Lines (1998) | [native-mac](games/commandos-behind-enemy-lines/native-mac/): our native port. Single-player works: videos, menus, missions, save and load. | [wine-11-athei](games/commandos-behind-enemy-lines/other-versions/wine-11-athei/), [wine-8](games/commandos-behind-enemy-lines/other-versions/wine-8/) |
 | Revenant (1999) | [native-mac](games/revenant/native-mac/): our native port. Single-player works: intro video, menus, new game, walking and talking, load and save, music. Not played to the end. | [wine-11-athei](games/revenant/other-versions/wine-11-athei/), [wine-8](games/revenant/other-versions/wine-8/) |
 | Command & Conquer Generals Zero Hour (2003) | [open-source-port](games/command-and-conquer-generals-zero-hour/open-source-port/): GeneralsX, the community port built from the source code that EA released (not ours; our fork of it is the submodule `GeneralsX/`, branch `custom`). Plays. | [native-mac](games/command-and-conquer-generals-zero-hour/other-versions/native-mac/) (our recompile of the 1.04 exe, Direct3D 8 on DXVK and MoltenVK: menus, 3D menu scene, skirmish (10 minutes), campaign start), [wine-11-athei](games/command-and-conquer-generals-zero-hour/other-versions/wine-11-athei/), [wine-8](games/command-and-conquer-generals-zero-hour/other-versions/wine-8/) |
+| Medal of Honor: Allied Assault (2002), with Spearhead and Breakthrough | [open-source-port](games/medal-of-honor-allied-assault/open-source-port/): OpenMoHAA, a community engine (not ours). This repository has the setup only: launcher, controller and Cmd+Enter settings, and the scripts that take the data out of the GOG installer. Main menu tested. | none |
 
 All versions of a game read the same saves (Generals: since 2026-10-08,
 see [the GeneralsX notes](games/command-and-conquer-generals-zero-hour/open-source-port/README.md)).
@@ -139,4 +142,7 @@ checksums) before a test.
   Hassan (see [LICENSE](LICENSE)).
 - The games belong to their owners: Commandos (Pyro Studios), Revenant
   (Cinematix Studios, Eidos Interactive), Command & Conquer Generals Zero
-  Hour (Electronic Arts).
+  Hour and Medal of Honor: Allied Assault (Electronic Arts).
+- OpenMoHAA (the engine of the Medal of Honor apps) is not in this
+  repository: `make-app.sh` downloads its release. It has its own license
+  (GPL 2 or later).
