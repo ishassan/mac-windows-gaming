@@ -50,7 +50,6 @@ the game.
 | `extract-game-files.sh <installer> <game folder>` | Takes the data out of the installer with `innoextract` and sorts it (see "Game files"). |
 | `install.sh <game folder>` | Puts the apps from `build/` into `<game folder>/open-source-port/`, and makes the `Settings` folder, the save links and the shortcuts. |
 | `controller.cfg` | The buttons of the PS4 controller (DUALSHOCK 4). |
-| `controller-allied-assault.cfg` | Allied Assault only: L1 and R1 get grenades and second fire mode, because Allied Assault has no lean in single player. |
 | `mac-keys.cfg` | Removes the Cmd and Enter binds of an earlier version of this file (the player config keeps binds). |
 | `mkalias.swift` | Makes the Finder aliases with the bookmark API of Foundation, so Finder does not come to the front. |
 
@@ -97,9 +96,8 @@ The result:
   - `+set in_joystick 1 +set in_joystickUseAnalog 1`: the controller, with
     analog sticks. Both are off by default, and `in_joystick` is read only
     at start.
-  - `+exec controller.cfg +exec mac-keys.cfg` (the Allied Assault app also
-    runs `controller-allied-assault.cfg` after `controller.cfg`): these run
-    after the game's own configs (`default.cfg`, the player config, `autoexec.cfg`).
+  - `+exec controller.cfg +exec mac-keys.cfg`: these run after the game's
+    own configs (`default.cfg`, the player config, `autoexec.cfg`).
 - The saves go to `<fs_homepath>/<main|mainta|maintt>/save/<player>`, so
   `Settings/<game>/save` is a link to `Saves/<game>`.
 - The apps are signed ad hoc (`codesign --force --deep -s -`).
@@ -138,7 +136,7 @@ Square `X`, Triangle `Y`, SHARE `BACK`, OPTIONS `START`):
 | R2, L2 | fire, aim (hold; with a sniper rifle, the scope) |
 | Cross, Circle | jump, crouch |
 | Square, Triangle | reload, next weapon |
-| L1, R1 | lean left, lean right (hold; Spearhead and Breakthrough). Allied Assault: grenades, second fire mode (`controller-allied-assault.cfg`) |
+| L1, R1 | lean left, lean right (hold) |
 | L3, R3 | walk (hold), use |
 | D-pad | rifle (up), submachine gun (down), grenades (left), second fire mode (right: rifle butt hit, grenade throw, scope) |
 | Touchpad, SHARE, OPTIONS | health or binoculars, scores, menu |
@@ -212,10 +210,13 @@ and window opens the controller again (`IN_Restart`), the game saw a new R2
 press and fired. With 0.8, a test with 6 switches gave no R2 press.
 
 Lean: in Allied Assault single player the engine sets the lean angle to 0
-(`pm->leanMax = 0` in `code/fgame/player.cpp`, "like in the original
-game"), so `+leanleft` and `+leanright` do nothing there (found
-2026-10-29). Spearhead and Breakthrough lean up to 45 degrees in single
-player, but only while the player does not move, jump or crouch
+(`leanMax 0` in `code/fgame/player.cpp` and `code/cgame/cg_predict.c`,
+"like in the original game"), so `+leanleft` and `+leanright` did nothing
+there (found 2026-10-29). The fork adds the setting `g_singlePlayerLean`
+(default 0): with 1, Allied Assault single player leans as its
+multiplayer does (up to 40 degrees, also while moving). `controller.cfg`
+sets 1. Spearhead and Breakthrough lean up to 45 degrees in single player
+in any case, but only while the player does not move, jump or crouch
 (`bg_pmove.cpp`).
 
 The menus need the trackpad or mouse. The engine finds a controller that is

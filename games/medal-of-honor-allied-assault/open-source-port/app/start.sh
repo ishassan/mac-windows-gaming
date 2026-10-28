@@ -11,12 +11,8 @@ APP="$(cd "$DIR/../.." && pwd)"
 VERSION_DIR="$(dirname "$APP")"
 GAME_ROOT="$(dirname "$VERSION_DIR")"
 while [ ! -d "$GAME_ROOT/Original Game Files" ] && [ "$GAME_ROOT" != / ]; do GAME_ROOT="$(dirname "$GAME_ROOT")"; done
-# Allied Assault (0) has no lean in single player: its own controller file
-# gives L1 and R1 other actions.
-GAME_CONFIG=()
-[ @TARGET_GAME@ = 0 ] && GAME_CONFIG=(+exec controller-allied-assault.cfg)
 exec "$DIR/openmohaa" +set com_target_game @TARGET_GAME@ \
   +set fs_basepath "$GAME_ROOT/Original Game Files" \
   +set fs_homepath "$VERSION_DIR/Settings" \
   +set in_joystick 1 +set in_joystickUseAnalog 1 \
-  +exec controller.cfg "${GAME_CONFIG[@]}" +exec mac-keys.cfg "$@"
+  +exec controller.cfg +exec mac-keys.cfg "$@"
