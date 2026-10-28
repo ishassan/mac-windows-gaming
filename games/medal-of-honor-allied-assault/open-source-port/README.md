@@ -133,12 +133,12 @@ Square `X`, Triangle `Y`, SHARE `BACK`, OPTIONS `START`):
 | Button | Action |
 |---|---|
 | Left stick, right stick | move; turn and aim (analog: the binds `+forward`, `+back`, `+moveleft`, `+moveright`, `+left`, `+right`, `+lookup`, `+lookdown` select the axes) |
-| R2, L2 | fire, second fire mode |
+| R2, L2 | fire, aim (hold; with a sniper rifle, the scope) |
 | Cross, Circle | jump, crouch |
 | Square, Triangle | reload, next weapon |
-| L1, R1 | lean left, lean right |
+| L1, R1 | grenades, second fire mode (rifle butt hit, grenade throw, scope) |
 | L3, R3 | walk (hold), use |
-| D-pad | rifle (up), submachine gun (right), pistol (left), grenade (down) |
+| D-pad | rifle (up), submachine gun (down), lean left and right (hold) |
 | Touchpad, SHARE, OPTIONS | health or binoculars, scores, menu |
 
 Right stick speed: the turn speed is `j_yaw` (left and right) or `j_pitch`
@@ -151,6 +151,33 @@ PS4 controller (2026-10-18), so `controller.cfg` sets `j_yaw -0.0064` and
 `j_pitch 0.0047` (about 180 and 130 degrees per second with no zoom).
 `controller.cfg` runs after the player config, so its values win at each
 start.
+
+Stick curve: the fork branch `feature/controller-aim` adds `j_curve`. The
+right stick value (0 to 1, after the dead zone) goes to this power before
+the turn speed is applied. `controller.cfg` sets 2: a half push turns at a
+quarter of the full speed, so small moves are slow and exact, and a full
+push turns at the speed above. 1 (the default) is the old straight line.
+
+Aim mode (2026-10-29, the same branch): the command `+aim` (L2).
+
+- While it is held, the client sets the setting `cl_aim` to 1. The cgame
+  then zooms from `cg_fov` to `cg_aimFov` (55) in `cg_aimTime` (150) ms,
+  and multiplies the turn speed by `cg_aimSensitivity` (0.6), on top of the
+  zoom scale. The original game has no aim animation, so the gun stays at
+  the hip.
+- When it is pressed and released, the client also sends the game the
+  command `aimzoom 1` or `aimzoom 0`. With a weapon that has a zoom (a
+  scope, for example the Springfield: `zoom 20` in its `.tik`), the game
+  opens or closes the scope, as the second fire button does. The cgame
+  zoom of aim mode stops while a scope is open.
+- So the second fire mode moved to R1, and lean moved to the D-pad. The
+  pistol has no D-pad button now: Triangle (next weapon) reaches it.
+- Test 2026-10-29 (test `fs_homepath`, level m2l1, console commands
+  `+aim`/`-aim`, no controller): with the Springfield '03 Sniper, the
+  scope opened (`fov` 20) and closed (`fov` 80). With the silenced pistol,
+  the view zoomed in and back, the gun stayed in view, and the game `fov`
+  stayed 80. The stick curve and the slower turn need the controller, so
+  they were not tested then.
 
 Trigger dead zone: `controller.cfg` sets `joy_triggerThreshold 0.8` (the
 fork's setting; `joy_threshold` 0.15 stays for the sticks). Measured
