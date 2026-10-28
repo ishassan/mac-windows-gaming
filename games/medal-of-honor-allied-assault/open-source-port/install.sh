@@ -5,7 +5,8 @@
 #   open-source-port/<app>.app            the three apps; an app that is there
 #                                         already goes to the Trash first
 #   open-source-port/Settings             fs_homepath of the apps
-#   Settings/main/controller.cfg, mac-keys.cfg   copied only when missing, so
+#   Settings/main/controller.cfg, controller-allied-assault.cfg, mac-keys.cfg
+#                                         copied only when missing, so
 #                                         changes made in the game folder stay
 #   Settings/<main|mainta|maintt>/save    links to Saves/<game>
 #   <game folder>/<app name>              Finder aliases to the apps
@@ -37,7 +38,7 @@ link_save() { # $1 game folder name (main, mainta, maintt), $2 Saves folder
 link_save main "Allied Assault"
 link_save mainta Spearhead
 link_save maintt Breakthrough
-for f in controller.cfg mac-keys.cfg; do
+for f in controller.cfg controller-allied-assault.cfg mac-keys.cfg; do
     if [[ ! -e "$V/Settings/main/$f" ]]; then
         cp "$HERE/$f" "$V/Settings/main/$f"
     elif ! cmp -s "$HERE/$f" "$V/Settings/main/$f"; then

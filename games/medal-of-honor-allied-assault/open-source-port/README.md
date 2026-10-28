@@ -50,6 +50,7 @@ the game.
 | `extract-game-files.sh <installer> <game folder>` | Takes the data out of the installer with `innoextract` and sorts it (see "Game files"). |
 | `install.sh <game folder>` | Puts the apps from `build/` into `<game folder>/open-source-port/`, and makes the `Settings` folder, the save links and the shortcuts. |
 | `controller.cfg` | The buttons of the PS4 controller (DUALSHOCK 4). |
+| `controller-allied-assault.cfg` | Allied Assault only: L1 and R1 get grenades and second fire mode, because Allied Assault has no lean in single player. |
 | `mac-keys.cfg` | Removes the Cmd and Enter binds of an earlier version of this file (the player config keeps binds). |
 | `mkalias.swift` | Makes the Finder aliases with the bookmark API of Foundation, so Finder does not come to the front. |
 
@@ -96,8 +97,9 @@ The result:
   - `+set in_joystick 1 +set in_joystickUseAnalog 1`: the controller, with
     analog sticks. Both are off by default, and `in_joystick` is read only
     at start.
-  - `+exec controller.cfg +exec mac-keys.cfg`: these run after the game's
-    own configs (`default.cfg`, the player config, `autoexec.cfg`).
+  - `+exec controller.cfg +exec mac-keys.cfg` (the Allied Assault app also
+    runs `controller-allied-assault.cfg` after `controller.cfg`): these run
+    after the game's own configs (`default.cfg`, the player config, `autoexec.cfg`).
 - The saves go to `<fs_homepath>/<main|mainta|maintt>/save/<player>`, so
   `Settings/<game>/save` is a link to `Saves/<game>`.
 - The apps are signed ad hoc (`codesign --force --deep -s -`).
@@ -136,9 +138,9 @@ Square `X`, Triangle `Y`, SHARE `BACK`, OPTIONS `START`):
 | R2, L2 | fire, aim (hold; with a sniper rifle, the scope) |
 | Cross, Circle | jump, crouch |
 | Square, Triangle | reload, next weapon |
-| L1, R1 | grenades, second fire mode (rifle butt hit, grenade throw, scope) |
+| L1, R1 | lean left, lean right (hold; Spearhead and Breakthrough). Allied Assault: grenades, second fire mode (`controller-allied-assault.cfg`) |
 | L3, R3 | walk (hold), use |
-| D-pad | rifle (up), submachine gun (down), lean left and right (hold) |
+| D-pad | rifle (up), submachine gun (down), grenades (left), second fire mode (right: rifle butt hit, grenade throw, scope) |
 | Touchpad, SHARE, OPTIONS | health or binoculars, scores, menu |
 
 Right stick speed: the turn speed is `j_yaw` (left and right) or `j_pitch`
@@ -163,19 +165,29 @@ Aim mode (2026-10-29, the same branch): the command `+aim` (L2).
 - While it is held, the client sets the setting `cl_aim` to 1. The cgame
   then zooms from `cg_fov` to `cg_aimFov` (40, about 2 times) in
   `cg_aimTime` (150) ms, and multiplies the turn speed by
-  `cg_aimSensitivity` (0.5), on top of the zoom scale. The original game
+  `cg_aimSensitivity` (0.3), on top of the zoom scale. In a scope,
+  `cg_scopeSensitivity` (0.5, a setting of the fork) slows the turn more,
+  on top of the scope zoom scale. The original game
   has no aim animation, so the gun stays at the hip.
 - Aim mode is off in a scope, at intermission, and in a camera view
   (`PMF_CAMERA_VIEW`), but not in a camera view with `PMF_TURRET`: a gun
   on a vehicle (for example the car in mission 1) uses that view, and the
   player aims there.
+- A scope is a zoom stat (`STAT_INZOOM`) of 30 or less, the same limit as
+  the scope overlay in `cg_drawtools.cpp`. Turrets set the zoom stat too,
+  to 80 (`ToggleZoom(80)` in `vehicleturret.cpp`, `weapturret.cpp` and
+  `portableturret.cpp`). A debug log on the car in m1l3b (2026-10-29)
+  showed `pm_flags` 0x1090 (`PMF_TURRET`, `PMF_CAMERA_VIEW`,
+  `PMF_NO_PREDICTION`) and a zoom stat of 80, so aim mode was off there
+  until both rules were fixed.
 - When it is pressed and released, the client also sends the game the
   command `aimzoom 1` or `aimzoom 0`. With a weapon that has a zoom (a
   scope, for example the Springfield: `zoom 20` in its `.tik`), the game
   opens or closes the scope, as the second fire button does. The cgame
   zoom of aim mode stops while a scope is open.
-- So the second fire mode moved to R1, and lean moved to the D-pad. The
-  pistol has no D-pad button now: Triangle (next weapon) reaches it.
+- So the second fire mode and grenades moved to the D-pad (left and
+  right). The pistol has no D-pad button now: Triangle (next weapon)
+  reaches it.
 - Test 2026-10-29 (test `fs_homepath`, level m2l1, console commands
   `+aim`/`-aim`, no controller): with the Springfield '03 Sniper, the
   scope opened (`fov` 20) and closed (`fov` 80). With the silenced pistol,
@@ -187,7 +199,9 @@ Aim mode (2026-10-29, the same branch): the command `+aim` (L2).
   and back to 0 three times, and the scope opened. With the first values
   (`cg_aimFov 55`, `cg_aimSensitivity 0.6`, `j_curve 2`) the zoom was too
   small to notice and small stick moves were still too fast. With 40, 0.5
-  and 3 the zoom and the stick speed were good.
+  and 3 the zoom and the stick speed were good. Later the user asked for a
+  slower turn in aim mode and in a scope: 0.3 and `cg_scopeSensitivity`
+  0.5.
 
 Trigger dead zone: `controller.cfg` sets `joy_triggerThreshold 0.8` (the
 fork's setting; `joy_threshold` 0.15 stays for the sticks). Measured
@@ -196,6 +210,13 @@ fork's setting; `joy_threshold` 0.15 stays for the sticks). Measured
 the old dead zone the game saw R2 as held: each switch between full screen
 and window opens the controller again (`IN_Restart`), the game saw a new R2
 press and fired. With 0.8, a test with 6 switches gave no R2 press.
+
+Lean: in Allied Assault single player the engine sets the lean angle to 0
+(`pm->leanMax = 0` in `code/fgame/player.cpp`, "like in the original
+game"), so `+leanleft` and `+leanright` do nothing there (found
+2026-10-29). Spearhead and Breakthrough lean up to 45 degrees in single
+player, but only while the player does not move, jump or crouch
+(`bg_pmove.cpp`).
 
 The menus need the trackpad or mouse. The engine finds a controller that is
 connected after the start (`SDL_CONTROLLERDEVICEADDED`).
