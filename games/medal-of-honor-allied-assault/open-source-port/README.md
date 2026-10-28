@@ -154,17 +154,21 @@ start.
 
 Stick curve: the fork branch `feature/controller-aim` adds `j_curve`. The
 right stick value (0 to 1, after the dead zone) goes to this power before
-the turn speed is applied. `controller.cfg` sets 2: a half push turns at a
-quarter of the full speed, so small moves are slow and exact, and a full
+the turn speed is applied. `controller.cfg` sets 3: a half push turns at an
+eighth of the full speed, so small moves are slow and exact, and a full
 push turns at the speed above. 1 (the default) is the old straight line.
 
 Aim mode (2026-10-29, the same branch): the command `+aim` (L2).
 
 - While it is held, the client sets the setting `cl_aim` to 1. The cgame
-  then zooms from `cg_fov` to `cg_aimFov` (55) in `cg_aimTime` (150) ms,
-  and multiplies the turn speed by `cg_aimSensitivity` (0.6), on top of the
-  zoom scale. The original game has no aim animation, so the gun stays at
-  the hip.
+  then zooms from `cg_fov` to `cg_aimFov` (40, about 2 times) in
+  `cg_aimTime` (150) ms, and multiplies the turn speed by
+  `cg_aimSensitivity` (0.5), on top of the zoom scale. The original game
+  has no aim animation, so the gun stays at the hip.
+- Aim mode is off in a scope, at intermission, and in a camera view
+  (`PMF_CAMERA_VIEW`), but not in a camera view with `PMF_TURRET`: a gun
+  on a vehicle (for example the car in mission 1) uses that view, and the
+  player aims there.
 - When it is pressed and released, the client also sends the game the
   command `aimzoom 1` or `aimzoom 0`. With a weapon that has a zoom (a
   scope, for example the Springfield: `zoom 20` in its `.tik`), the game
@@ -178,6 +182,12 @@ Aim mode (2026-10-29, the same branch): the command `+aim` (L2).
   the view zoomed in and back, the gun stayed in view, and the game `fov`
   stayed 80. The stick curve and the slower turn need the controller, so
   they were not tested then.
+- Test 2026-10-29 with the PS4 controller (installed app, test
+  `fs_homepath` with a copy of the player config): L2 set `cl_aim` to 1
+  and back to 0 three times, and the scope opened. With the first values
+  (`cg_aimFov 55`, `cg_aimSensitivity 0.6`, `j_curve 2`) the zoom was too
+  small to notice and small stick moves were still too fast. With 40, 0.5
+  and 3 the zoom and the stick speed were good.
 
 Trigger dead zone: `controller.cfg` sets `joy_triggerThreshold 0.8` (the
 fork's setting; `joy_threshold` 0.15 stays for the sticks). Measured
